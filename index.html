@@ -69,6 +69,21 @@
   .SEA { background: var(--green); } .SDA { background: var(--amber); } .LSD { background: var(--lsd); } .NA { background: #9e9e9e; }
   .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .note { font-size: 14px; color: var(--muted); padding: 6px 0; }
+  #results { position: fixed; top: calc(62px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 8; background: #fff; border-radius: 14px; box-shadow: var(--shadow); max-height: 55vh; overflow-y: auto; }
+  .res { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+  .res:active { background: #f1f4fa; }
+  .res .ic { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: #fff; flex: none; }
+  .res .ic.svc { background: var(--blue); } .res .ic.stop { background: #0b7a75; } .res .ic.road { background: #ff9100; }
+  .res .tx { flex: 1; min-width: 0; font-size: 15px; }
+  .res .tx small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reshead { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 8px 12px 4px; background: #fafafa; }
+  .selsvc { background: #eef2ff; border: 2px solid var(--blue); border-radius: 14px; padding: 10px 12px; margin: 6px 0 4px; display: flex; align-items: center; gap: 10px; }
+  .selsvc .tx { flex: 1; min-width: 0; }
+  .selsvc .bigm { font-size: 24px; font-weight: 800; color: var(--blue); line-height: 1.1; }
+  .selsvc small { display: block; color: var(--muted); font-size: 12px; }
+  .err { font-size: 14px; color: #b71c1c; background: #ffebee; border-radius: 10px; padding: 10px; margin: 6px 0; }
+  .arr.off { opacity: .45; }
+  .trackbtn { border: 0; background: var(--red); color: #fff; font-weight: 700; border-radius: 999px; padding: 8px 12px; font-size: 14px; cursor: pointer; flex: none; }
   .legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
   .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; background: var(--c); }
   .grp { margin-top: 10px; font-weight: 700; font-size: 14px; color: var(--blue); }
@@ -130,7 +145,7 @@
 
 <div id="topbar">
   <form id="searchForm" autocomplete="off">
-    <input id="q" list="svcList" placeholder="Bus no. e.g. 105" aria-label="Bus service number">
+    <input id="q" placeholder="Bus no., stop code, stop or road" aria-label="Search bus, stop code, stop name or road" enterkeyhint="search">
     <button type="submit">Go</button>
   </form>
   <div id="modeChip" hidden></div>
@@ -139,6 +154,8 @@
   <button id="restartBtn" class="iconbtn" title="Restart everything" aria-label="Restart">↺</button>
   <button id="settingsBtn" class="iconbtn" title="Settings" aria-label="Settings">⚙</button>
 </div>
+
+<div id="results" hidden></div>
 
 <div id="routeBar" hidden>
   <div class="rtitle"><span class="svcbadge" id="routeNo"></span><div id="routeDir"></div></div>
@@ -416,7 +433,7 @@ function buildTrees(R) {
   const feats = [], stops = R.stopCh;
   const greens = [['#2e7d32', '#43a047'], ['#33691e', '#558b2f'], ['#1b5e20', '#388e3c'], ['#2e7d32', '#66bb6a']];
   let si = 0, k = 0;
-  for (let ch = 8; ch < R.length - 8; ch += 12, k++) {
+  for (let ch = 8; ch < R.length - 8; ch += 16, k++) {
     while (si < stops.length && stops[si] < ch - 25) si++;
     if (si < stops.length && Math.abs(stops[si] - ch) < 25) continue;
     let dh = Math.abs(headingAt(R, ch - 15, 5) - headingAt(R, ch + 15, 5));
@@ -555,7 +572,7 @@ function addLayers() {
       }
     });
   }
-  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop']) {
+  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop', 'road-stops']) {
     map.addSource(id, { type: 'geojson', data: emptyFC() });
   }
   map.addLayer({ id: 'all-stops', type: 'circle', source: 'all-stops', minzoom: 15,
@@ -564,7 +581,7 @@ function addLayers() {
     paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 6, 17, 16] } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
     paint: { 'line-color': '#3d5afe', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 17, 10] } });
-  map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 14,
+  map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 15,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'buses', type: 'fill-extrusion', source: 'buses',
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
@@ -595,6 +612,8 @@ function addLayers() {
     layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-offset': [0, -3.2],
               'text-allow-overlap': true },
     paint: { 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 } });
+  map.addLayer({ id: 'road-stops', type: 'circle', source: 'road-stops',
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 16, 10], 'circle-color': '#ff9100', 'circle-stroke-color': '#0d2c6c', 'circle-stroke-width': 2.5 } });
   map.addLayer({ id: 'me', type: 'circle', source: 'me',
     paint: { 'circle-radius': 7, 'circle-color': '#1a73e8', 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
   map.addLayer({ id: 'sel-stop', type: 'circle', source: 'sel-stop',
@@ -605,10 +624,17 @@ function addLayers() {
     map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
     map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
   }
-  map.on('dragstart', () => {
-    if (state.mode === 'onboard' && state.trip && state.trip.follow) { state.trip.follow = false; $('followBtn').hidden = false; }
+  // Any touch/mouse/wheel on the map stops the follow camera immediately, so gestures are never fought
+  const cont = map.getCanvasContainer();
+  const userTouch = () => {
     state.userMoved = true;
-  });
+    if (state.mode === 'onboard' && state.trip && state.trip.follow) { state.trip.follow = false; $('followBtn').hidden = false; }
+  };
+  cont.addEventListener('pointerdown', () => { state.touching = true; userTouch(); }, { passive: true });
+  cont.addEventListener('touchstart', () => { state.touching = true; userTouch(); }, { passive: true });
+  cont.addEventListener('wheel', userTouch, { passive: true });
+  const release = () => { state.touching = false; };
+  for (const ev of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) window.addEventListener(ev, release, { passive: true });
 }
 
 function setLayerVisible(id, on) { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); }
@@ -740,8 +766,8 @@ function renderRoute(R, opts = {}) {
   }
 }
 function clearRoute() {
-  state.R = null; state.vehicles = []; state.stopSig = '';
-  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop']) map.getSource(id) && map.getSource(id).setData(emptyFC());
+  state.R = null; state.vehicles = []; state.stopSig = ''; state.drewEmpty = true;
+  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop', 'road-stops']) map.getSource(id) && map.getSource(id).setData(emptyFC());
   for (const k of Object.keys(state.markers)) { if (state.markers[k]) state.markers[k].remove(); state.markers[k] = null; }
 }
 // stop status: passed / next / alight / board / normal
@@ -789,7 +815,7 @@ function updateStops(force) {
 // ======================= map taps =======================
 function onMapClick(e) {
   const p = e.point, pad = 14;
-  const layers = state.mode === 'browse' ? ['route-stops', 'all-stops'] : ['route-stops'];
+  const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'all-stops'] : ['route-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
   if (!feats.length) return;
   const f = feats[0].properties;
@@ -856,9 +882,13 @@ function mergeVehicles(fresh) {
 let lastFrame = 0;
 function frame(ts) {
   requestAnimationFrame(frame);
-  if (document.hidden || ts - lastFrame < 50) return;     // ~20 fps
+  const onboard = state.mode === 'onboard' && state.trip;
+  const interval = onboard ? 66 : 100;                    // ~15 fps on a trip, ~10 fps otherwise
+  if (document.hidden || ts - lastFrame < interval) return;
   const dt = Math.min(0.5, (ts - lastFrame) / 1000); lastFrame = ts;
   const R = state.R; if (!R || !map.getSource('buses')) return;
+  // while your finger is on the map, let the map have the CPU (positions catch up afterwards)
+  const busy = state.touching || (map.isMoving() && !(onboard && state.trip.follow));
   const now = Date.now(), k = 1 - Math.exp(-dt / 0.8);
   const feats = [], pts = [];
   for (const v of state.vehicles) {
@@ -871,6 +901,7 @@ function frame(ts) {
   if (state.mode === 'onboard' && state.trip) {
     const T = state.trip;
     updateOwnBus(now, k);
+    if (busy) { tripProgress(); return; }
     const mv = state.vehicles.find(v => v.id === T.myVid);
     feats.push(...busParts(R, T.disp, { color: COLORS.bus, roof: COLORS.busRoof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
     pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.bus, mine: true } });
@@ -878,6 +909,9 @@ function frame(ts) {
     tripProgress();
     if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
   }
+  if (busy) return;
+  if (!feats.length && state.drewEmpty) return;           // nothing changed, skip the redraw
+  state.drewEmpty = !feats.length;
   map.getSource('buses').setData({ type: 'FeatureCollection', features: feats });
   map.getSource('bus-pts').setData({ type: 'FeatureCollection', features: pts });
 }
@@ -898,6 +932,8 @@ function showService(no, dir = 0) {
   const s = state.services[no];
   if (!s) { toast('No bus service "' + no + '"'); return; }
   if (state.mode !== 'browse') enterMode('browse');
+  clearTimeout(searchT); $('results').hidden = true;
+  map.getSource('road-stops') && map.getSource('road-stops').setData(emptyFC());
   const R = getRoute(no, Math.min(dir, s.routes.length - 1));
   renderRoute(R, { fit: true });
   $('routeNo').textContent = no;
@@ -923,34 +959,130 @@ async function pollBrowse() {
     const c = state.vehicles.length;
     $('liveStatus').textContent = c ? `🟢 ${c} bus${c > 1 ? 'es' : ''} live · ${hhmm()}` : `No live buses this direction · ${hhmm()}`;
   } catch (e) {
-    if (token === state.pollToken) $('liveStatus').textContent = '⚠ ' + e.message;
+    if (token === state.pollToken) $('liveStatus').innerHTML = '', $('liveStatus').append(h('span', { style: 'color:#b71c1c' }, '⚠ Live buses unavailable: ' + e.message));
   }
 }
 function clearService() {
   setPoll(null); clearRoute();
-  $('routeBar').hidden = true; $('q').value = ''; hidePanel();
+  $('routeBar').hidden = true; $('q').value = ''; hidePanel(); $('results').hidden = true;
+  map.getSource('road-stops').setData(emptyFC());
   history.replaceState(null, '', location.pathname);
 }
-$('searchForm').addEventListener('submit', e => { e.preventDefault(); const v = $('q').value.trim().toUpperCase(); if (v) showService(v, 0); });
+// ---------- unified search: bus number, stop code, stop name, road ----------
+const SEARCH = { roads: null };
+let searchT = null;
+function searchIndex() {
+  if (SEARCH.roads) return;
+  SEARCH.roads = {};
+  for (const [code, st] of Object.entries(state.stops)) (SEARCH.roads[st[3]] ||= []).push(code);
+}
+function refPoint() { return state.user ? state.user.ll : map.getCenter().toArray(); }
+function runSearch(raw) {
+  const q = raw.trim(); if (!q) return null;
+  searchIndex();
+  const ql = q.toLowerCase(), qu = q.toUpperCase(), ref = refPoint();
+  const svcs = Object.keys(state.services).filter(no => no.startsWith(qu))
+    .sort((a, b) => (a === qu ? -1 : b === qu ? 1 : naturalSort(a, b))).slice(0, 6);
+  const stops = [];
+  if (ql.length >= 2 || /^\d+$/.test(q)) {
+    for (const [code, st] of Object.entries(state.stops)) {
+      const nm = st[2].toLowerCase(), rd = st[3].toLowerCase();
+      let score = -1;
+      if (code === q) score = 0; else if (code.startsWith(q)) score = 1;
+      else if (nm.startsWith(ql)) score = 2; else if (rd.startsWith(ql)) score = 3;
+      else if (ql.length >= 3 && nm.includes(ql)) score = 4; else if (ql.length >= 3 && rd.includes(ql)) score = 5;
+      if (score >= 0) stops.push({ code, st, score, d: distM(ref, [st[0], st[1]]) });
+    }
+    stops.sort((a, b) => a.score - b.score || a.d - b.d);
+  }
+  const roads = ql.length >= 3 ? Object.keys(SEARCH.roads).filter(r => r.toLowerCase().includes(ql))
+    .sort((a, b) => (a.toLowerCase().startsWith(ql) ? 0 : 1) - (b.toLowerCase().startsWith(ql) ? 0 : 1) || a.localeCompare(b)).slice(0, 4) : [];
+  return { svcs, stops: stops.slice(0, 30), roads };
+}
+function renderResults(r) {
+  const box = $('results'); box.innerHTML = '';
+  if (!r || (!r.svcs.length && !r.stops.length && !r.roads.length)) {
+    if (r) { box.append(h('div', { class: 'note', style: 'padding:12px' }, 'No bus, stop or road found.')); box.hidden = false; }
+    else box.hidden = true;
+    return;
+  }
+  if (r.svcs.length) {
+    box.append(h('div', { class: 'reshead' }, 'Bus services'));
+    for (const no of r.svcs) box.append(h('div', { class: 'res', onclick: () => { hideResults(); showService(no, 0); } },
+      h('span', { class: 'ic svc' }, no), h('div', { class: 'tx' }, 'Bus ' + no, h('small', null, state.services[no].name))));
+  }
+  if (r.roads.length) {
+    box.append(h('div', { class: 'reshead' }, 'Roads'));
+    for (const rd of r.roads) box.append(h('div', { class: 'res', onclick: () => { hideResults(); showRoad(rd); } },
+      h('span', { class: 'ic road' }, '🛣'), h('div', { class: 'tx' }, rd, h('small', null, SEARCH.roads[rd].length + ' stops · show all on map'))));
+  }
+  if (r.stops.length) {
+    box.append(h('div', { class: 'reshead' }, 'Bus stops'));
+    for (const x of r.stops) box.append(h('div', { class: 'res', onclick: () => { hideResults(); goToStop(x.code); } },
+      h('span', { class: 'ic stop' }, '🚏'), h('div', { class: 'tx' }, x.st[2], h('small', null, x.code + ' · ' + x.st[3] + ' · ' + fmtDist(x.d)))));
+  }
+  box.hidden = false; box.scrollTop = 0;
+}
+function hideResults() { clearTimeout(searchT); $('results').hidden = true; $('q').blur(); }
+function goToStop(code, keepRoad) {
+  const st = state.stops[code]; if (!st) return;
+  $('q').value = st[2];
+  if (!keepRoad) map.getSource('road-stops').setData(emptyFC());
+  map.flyTo({ center: [st[0], st[1]], zoom: 17, duration: 900 });
+  openStop(code);
+}
+function showRoad(rd) {
+  const codes = SEARCH.roads[rd] || []; if (!codes.length) return;
+  $('q').value = rd;
+  const ref = refPoint();
+  const list = codes.map(code => ({ code, st: state.stops[code], d: distM(ref, [state.stops[code][0], state.stops[code][1]]) })).sort((a, b) => a.d - b.d);
+  map.getSource('road-stops').setData({ type: 'FeatureCollection', features: list.map(x => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [x.st[0], x.st[1]] }, properties: { code: x.code } })) });
+  const b = new maplibregl.LngLatBounds(); list.forEach(x => b.extend([x.st[0], x.st[1]]));
+  map.fitBounds(b, { padding: { top: 120, bottom: Math.round(innerHeight * 0.45), left: 50, right: 50 }, maxZoom: 17, duration: 900 });
+  setPanel(panelHead(rd, () => { map.getSource('road-stops').setData(emptyFC()); hidePanel(); }),
+    h('div', { class: 'sub' }, list.length + ' bus stops on this road (orange on the map) · nearest first'),
+    h('div', { class: 'stoplist', style: 'max-height:40vh' }, list.map(x => h('div', { class: 'stopitem', onclick: () => goToStop(x.code, true) },
+      h('span', { class: 'seq', style: 'background:#ff9100' }, '🚏'),
+      h('div', { class: 'nm' }, x.st[2], h('small', null, x.code + ' · ' + (state.stopServices[x.code] || []).join(', '))),
+      h('span', { class: 'meta' }, fmtDist(x.d))))));
+}
+$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) renderResults(runSearch($('q').value)); }, 120); });
+$('q').addEventListener('focus', () => { if ($('q').value.trim()) renderResults(runSearch($('q').value)); });
+$('q').addEventListener('keydown', e => { if (e.key === 'Escape') hideResults(); });
+map.on('movestart', e => { if (e.originalEvent) $('results').hidden = true; });
+map.on('click', () => { $('results').hidden = true; });
+$('searchForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('q').value.trim(); if (!v) return;
+  const qu = v.toUpperCase();
+  if (state.services[qu]) { hideResults(); return showService(qu, 0); }
+  if (state.stops[v]) { hideResults(); return goToStop(v); }
+  const r = runSearch(v);
+  if (r && r.svcs.length + r.stops.length + r.roads.length === 1) {
+    hideResults();
+    if (r.svcs.length) return showService(r.svcs[0], 0);
+    if (r.stops.length) return goToStop(r.stops[0].code);
+    return showRoad(r.roads[0]);
+  }
+  renderResults(r);
+});
 $('dirBtn').onclick = () => state.R && showService(state.R.no, state.R.dir === 0 ? 1 : 0);
 $('clearBtn').onclick = clearService;
 
-// Stop sheet (browse)
+// Stop sheet (browse): live arrivals first
 function openStop(code) {
   const st = state.stops[code]; if (!st) return;
   state.sheetStop = code;
   map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [st[0], st[1]] }, properties: {} });
-  const chips = (state.stopServices[code] || []).map(no => h('button', {
-    class: 'chip' + (state.R && no === state.R.no ? ' current' : ''), title: state.services[no].name,
-    onclick: () => { const d = state.services[no].routes.findIndex(r => r.includes(code)); showService(no, Math.max(0, d)); openStop(code); }
-  }, no));
-  const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading…'));
+  const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading live arrivals…'));
   setPanel(
     panelHead(st[2], closeStop),
     h('div', { class: 'sub' }, code + ' · ' + st[3] + (state.user ? ' · ' + fmtDist(distM(state.user.ll, [st[0], st[1]])) + ' away' : '')),
-    h('h3', null, 'Services at this stop'), h('div', { class: 'chips' }, chips),
-    h('h3', null, 'Live arrivals · tap ⏱ to track the next bus'), arrivals,
-    legend());
+    (state.R && (state.stopServices[code] || []).includes(state.R.no)) ? h('div', { id: 'selSvc' }) : null,
+    h('h3', null, 'Live arrivals ', h('span', { id: 'arrUpdated', style: 'text-transform:none;letter-spacing:0' })),
+    arrivals,
+    legend(),
+    h('div', { class: 'note', style: 'font-size:12px' }, 'Tap a bus number to see its route · tap Track to follow the next bus coming here.'));
   map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
   clearInterval(state.sheetTimer);
   loadArrivals(code);
@@ -964,25 +1096,60 @@ function timePills(buses) {
   const pills = (buses || []).slice(0, 3).map(b => h('span', { class: 't ' + (b.load || 'NA'), title: LOAD_TXT[b.load] || '' }, fmtMins(minsUntil(Date.parse(b.eta)))));
   return pills.length ? pills : [h('span', { class: 'meta' }, 'Not in operation')];
 }
+// Big line for the service you're viewing, e.g. "105 → Jurong East Int: 3 min, then 11 min"
+function renderSelSvc(code, live) {
+  const box = $('selSvc'); if (!box || !state.R) return;
+  const no = state.R.no, sv = live.find(x => x.ServiceNo === no), buses = sv ? sv.buses : [];
+  const mins = buses.map(b => minsUntil(Date.parse(b.eta)));
+  const first = mins.length ? (mins[0] <= 0 ? 'Arriving' : mins[0] + ' min') : 'No live arrival';
+  const rest = mins.slice(1).map(m => (m <= 0 ? 'Arr' : m + ' min'));
+  const b0 = buses[0] || {};
+  box.className = 'selsvc'; box.innerHTML = '';
+  box.append(
+    h('span', { class: 'svcbadge' }, no),
+    h('div', { class: 'tx' },
+      h('div', { class: 'bigm' }, first),
+      h('small', null, (rest.length ? 'then ' + rest.join(', ') + ' · ' : '') + '→ ' + (b0.dest ? stopName(b0.dest) : state.R.dest) + (b0.load ? ' · ' + LOAD_TXT[b0.load] : ''))),
+    buses.length && boardableDir(no, code) >= 0 ? h('button', { class: 'trackbtn', onclick: () => startWaiting(no, code, null) }, 'Track ▶') : null);
+}
+function showRouteFrom(no, code) {
+  const sv = state.services[no]; if (!sv) return toast('No route data for ' + no);
+  const d = sv.routes.findIndex(r => r.includes(code));
+  showService(no, Math.max(0, d)); openStop(code);
+}
 async function loadArrivals(code) {
   const box = $('arrivals'); if (!box) return;
+  const all = state.stopServices[code] || [];
   try {
     const data = await api('/multi-arrival?stops=' + code);
     if (state.sheetStop !== code || !$('arrivals')) return;
-    const list = ((data.stops || {})[code] || []).slice().sort((a, b) => naturalSort(a.ServiceNo, b.ServiceNo));
+    const live = ((data.stops || {})[code] || []).filter(sv => sv.buses && sv.buses.length)
+      .sort((a, b) => Date.parse(a.buses[0].eta) - Date.parse(b.buses[0].eta));
     box.innerHTML = '';
-    if (!list.length) box.append(h('div', { class: 'note' }, 'No buses arriving right now.'));
-    for (const sv of list) {
+    if (!live.length) box.append(h('div', { class: 'note' }, 'No buses arriving right now (services may have ended for the day).'));
+    for (const sv of live) {
       const b0 = sv.buses[0] || {};
       const canTrack = state.services[sv.ServiceNo] && boardableDir(sv.ServiceNo, code) >= 0;
       box.append(h('div', { class: 'arr' },
-        h('button', { class: 'chip', onclick: () => { const d = state.services[sv.ServiceNo] ? state.services[sv.ServiceNo].routes.findIndex(r => r.includes(code)) : -1; if (d < 0) return toast('No route data'); showService(sv.ServiceNo, d); openStop(code); } }, sv.ServiceNo),
-        h('div', { class: 'info' }, h('div', { class: 'dest' }, '→ ' + (b0.dest ? stopName(b0.dest) : '')), h('div', { class: 'times' }, timePills(sv.buses))),
-        h('span', { class: 'meta' }, [TYPE_TXT[b0.type] ? b0.type : '', b0.feature === 'WAB' ? '♿' : ''].filter(Boolean).join(' ')),
-        canTrack ? h('button', { class: 'pill primary', title: 'Track next bus', onclick: () => startWaiting(sv.ServiceNo, code, null) }, '⏱') : null));
+        h('button', { class: 'chip' + (state.R && state.R.no === sv.ServiceNo ? ' current' : ''), onclick: () => showRouteFrom(sv.ServiceNo, code) }, sv.ServiceNo),
+        h('div', { class: 'info' },
+          h('div', { class: 'dest' }, '→ ' + (b0.dest ? stopName(b0.dest) : '') + (b0.type ? ' · ' + (TYPE_TXT[b0.type] || b0.type) : '') + (b0.feature === 'WAB' ? ' · ♿' : '')),
+          h('div', { class: 'times' }, timePills(sv.buses))),
+        canTrack ? h('button', { class: 'trackbtn', onclick: () => startWaiting(sv.ServiceNo, code, null) }, 'Track ▶') : null));
     }
+    renderSelSvc(code, live);
+    const liveNos = new Set(live.map(x => x.ServiceNo));
+    for (const no of all.filter(n => !liveNos.has(n))) {
+      box.append(h('div', { class: 'arr off' },
+        h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no),
+        h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no].name), h('div', { class: 'meta' }, 'No live arrival'))));
+    }
+    if ($('arrUpdated')) $('arrUpdated').textContent = '· ' + hhmm();
   } catch (e) {
-    if (state.sheetStop === code && $('arrivals')) box.innerHTML = '', box.append(h('div', { class: 'note' }, '⚠ ' + e.message));
+    if (state.sheetStop !== code || !$('arrivals')) return;
+    box.innerHTML = '';
+    box.append(h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + e.message + '. Tap ⚙ → Test to check the proxy.'));
+    for (const no of all) box.append(h('div', { class: 'arr off' }, h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no), h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no].name))));
   }
 }
 
@@ -1301,7 +1468,7 @@ function renderConnect(data) {
     panelHead('You have arrived', null, A.fromNo),
     h('div', { class: 'sub' }, stopName(A.code) + ' (' + A.code + ')'),
     h('div', { class: 'big', style: 'font-size:18px' }, 'Connecting bus? Pick the service you are taking next.'),
-    data && data.error ? h('div', { class: 'note' }, '⚠ ' + data.error) : null,
+    data && data.error ? h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + data.error + '. Tap ⚙ → Test.') : null,
     groups.length ? groups : h('div', { class: 'note' }, 'No services found nearby.'),
     legend(),
     h('div', { class: 'row' }, h('button', { class: 'pill', onclick: resetAll }, 'No thanks – finish'),
@@ -1375,7 +1542,7 @@ async function pollWaiting() {
       const b = new maplibregl.LngLatBounds(); b.extend(stopLL(W.code)); b.extend(toLL(xyAt(R, mv.disp)));
       map.fitBounds(b, { padding: { top: 140, bottom: $('panel').offsetHeight + 40, left: 60, right: 60 }, maxZoom: 16.5, duration: 900 });
     }
-  } catch (e) { if (waitUI) waitUI.upd.textContent = '⚠ ' + e.message; }
+  } catch (e) { if (waitUI) { waitUI.loaded = false; waitUI.count.textContent = 'Live data unavailable'; waitUI.info.textContent = '⚠ ' + e.message + ' – tap ⚙ → Test'; waitUI.info.style.color = '#b71c1c'; } }
 }
 // Auto-switch to on-board once your GPS moves along the route past the boarding stop
 function waitOnFix(ll, acc, t) {
@@ -1416,7 +1583,7 @@ function resetAll() {
   state.userMoved = false;
   enterMode('browse');
   clearRoute(); hidePanel();
-  $('alertBox').hidden = true; $('routeBar').hidden = true; $('q').value = '';
+  $('alertBox').hidden = true; $('routeBar').hidden = true; $('q').value = ''; $('results').hidden = true;
   history.replaceState(null, '', location.pathname);
   map.easeTo({ center: state.user ? state.user.ll : [103.8198, 1.3521], zoom: state.user ? 15.5 : 11, pitch: 50, bearing: -15, duration: 900 });
   toast('Restarted');
