@@ -49,9 +49,16 @@
   #liveStatus { font-size: 13px; color: var(--muted); flex: 1; }
 
   /* ---------- bottom panel ---------- */
-  #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,0.2); max-height: 60vh; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); }
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; transition: max-height .2s; z-index: 6; background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,0.2); max-height: 60vh; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); }
   #panel[hidden] { display: none; }
-  .grab { width: 40px; height: 5px; border-radius: 3px; background: #ccc; margin: 0 auto 8px; }
+  .pbar { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; min-height: 30px; touch-action: none; }
+  .pbar .grab { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); width: 40px; height: 5px; border-radius: 3px; background: #ccc; }
+  .pbar .sum { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: var(--blue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: none; }
+  .hidebtn { margin-left: auto; border: 1px solid #ddd; background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink); flex: none; }
+  #panel.collapsed { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); overflow: hidden; cursor: pointer; }
+  #panel.collapsed > :not(.pbar) { display: none !important; }
+  #panel.collapsed .pbar { margin: 0; }
+  #panel.collapsed .pbar .sum { display: block; }
   .phead { display: flex; align-items: flex-start; gap: 10px; }
   .phead h2 { margin: 0; font-size: 19px; flex: 1; line-height: 1.25; }
   .sub { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
@@ -490,6 +497,16 @@ function naturalSort(a, b) {
 }
 function distM(a, b) { const p = toXY(a), q = toXY(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); }
 function fmtDist(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km'; }
+// Read LTA times in any common format: +08:00, +0800, space instead of T, or no time zone (= Singapore)
+function parseEta(v) {
+  if (v == null || v === '') return NaN;
+  if (typeof v === 'number') return v;
+  let s = String(v).trim().replace(' ', 'T');
+  s = s.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+  if (!/(Z|[+-]\d{2}:\d{2})$/.test(s)) s += '+08:00';
+  const t = Date.parse(s);
+  return isNaN(t) ? Date.parse(String(v)) : t;
+}
 function minsUntil(t) { if (t == null || isNaN(t)) return null; return Math.round((t - Date.now()) / 60000); }
 function fmtMins(m) { return m === null ? '–' : (m <= 0 ? 'Arr' : m + ' min'); }
 function hhmm() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
@@ -692,13 +709,50 @@ $('locateBtn').onclick = () => {
 };
 
 // ======================= panel / UI helpers =======================
-function setPanel(...nodes) {
+// Bottom panel with a Hide/Show bar. Panels re-drawn for the same context (key) keep their hidden state.
+const panelState = { key: null, hidden: false, summary: null };
+function setPanel(...nodes) { return setPanelKeyed(null, ...nodes); }
+function setPanelKeyed(key, ...nodes) {
+  if (!key || key !== panelState.key) panelState.hidden = false;
+  panelState.key = key;
+  panelState.summary = null;
   const p = $('panel'); p.innerHTML = '';
-  p.append(h('div', { class: 'grab' }), ...nodes.flat(Infinity).filter(n => n != null && n !== false));
+  const sum = h('div', { class: 'sum' });
+  const btn = h('button', { class: 'hidebtn', onclick: e => { e.stopPropagation(); togglePanel(); } });
+  const bar = h('div', { class: 'pbar' }, h('span', { class: 'grab' }), sum, btn);
+  let y0 = null;                                            // swipe the bar down to hide, up to show
+  bar.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
+  bar.addEventListener('touchend', e => {
+    if (y0 == null) return; const dy = e.changedTouches[0].clientY - y0; y0 = null;
+    if (dy > 40 && !panelState.hidden) togglePanel(true); else if (dy < -40 && panelState.hidden) togglePanel(false);
+  }, { passive: true });
+  p.append(bar, ...nodes.flat(Infinity).filter(n => n != null && n !== false));
   p.hidden = false; p.scrollTop = 0;
+  applyPanelHidden();
   requestAnimationFrame(placeFabs);
 }
-function hidePanel() { $('panel').hidden = true; $('panel').innerHTML = ''; placeFabs(); }
+function setPanelSummary(fn) { panelState.summary = fn; updatePanelSummary(); }
+function updatePanelSummary() {
+  const el = document.querySelector('#panel .pbar .sum'); if (!el) return;
+  let txt = '';
+  try { txt = panelState.summary ? panelState.summary() : ''; } catch {}
+  if (!txt) { const t = document.querySelector('#panel .phead h2'); txt = t ? t.textContent : ''; }
+  el.textContent = txt;
+}
+function togglePanel(force) {
+  panelState.hidden = typeof force === 'boolean' ? force : !panelState.hidden;
+  applyPanelHidden();
+}
+function applyPanelHidden() {
+  const p = $('panel'), btn = p.querySelector('.hidebtn'); if (!btn) return;
+  p.classList.toggle('collapsed', panelState.hidden);
+  btn.textContent = panelState.hidden ? '▴ Show' : '▾ Hide';
+  p.onclick = panelState.hidden ? () => togglePanel(false) : null;
+  updatePanelSummary();
+  requestAnimationFrame(placeFabs);
+}
+setInterval(() => { if (panelState.hidden && !$('panel').hidden) updatePanelSummary(); }, 1000);
+function hidePanel() { $('panel').hidden = true; $('panel').innerHTML = ''; panelState.key = null; panelState.hidden = false; placeFabs(); }
 function placeFabs() {
   const p = $('panel');
   $('fabs').style.bottom = (p.hidden ? 24 : p.offsetHeight + 12) + 'px';
@@ -851,7 +905,7 @@ function vehiclesFrom(R, data, now) {
     const key = o.lat.toFixed(5) + ',' + o.lng.toFixed(5);
     let g = groups.get(key);
     if (!g) groups.set(key, g = { key, ll: [o.lng, o.lat], type: o.type, load: o.load, obs: [] });
-    g.obs.push({ code, t: Date.parse(o.eta) });
+    g.obs.push({ code, t: parseEta(o.eta) });
   }
   const out = [];
   for (const g of groups.values()) {
@@ -1039,7 +1093,7 @@ function showRoad(rd) {
   map.getSource('road-stops').setData({ type: 'FeatureCollection', features: list.map(x => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [x.st[0], x.st[1]] }, properties: { code: x.code } })) });
   const b = new maplibregl.LngLatBounds(); list.forEach(x => b.extend([x.st[0], x.st[1]]));
   map.fitBounds(b, { padding: { top: 120, bottom: Math.round(innerHeight * 0.45), left: 50, right: 50 }, maxZoom: 17, duration: 900 });
-  setPanel(panelHead(rd, () => { map.getSource('road-stops').setData(emptyFC()); hidePanel(); }),
+  setPanelKeyed('road:' + rd, panelHead(rd, () => { map.getSource('road-stops').setData(emptyFC()); hidePanel(); }),
     h('div', { class: 'sub' }, list.length + ' bus stops on this road (orange on the map) · nearest first'),
     h('div', { class: 'stoplist', style: 'max-height:40vh' }, list.map(x => h('div', { class: 'stopitem', onclick: () => goToStop(x.code, true) },
       h('span', { class: 'seq', style: 'background:#ff9100' }, '🚏'),
@@ -1075,7 +1129,8 @@ function openStop(code) {
   state.sheetStop = code;
   map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [st[0], st[1]] }, properties: {} });
   const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading live arrivals…'));
-  setPanel(
+  state.stopFirst = null;
+  setPanelKeyed('stop:' + code,
     panelHead(st[2], closeStop),
     h('div', { class: 'sub' }, code + ' · ' + st[3] + (state.user ? ' · ' + fmtDist(distM(state.user.ll, [st[0], st[1]])) + ' away' : '')),
     (state.R && (state.stopServices[code] || []).includes(state.R.no)) ? h('div', { id: 'selSvc' }) : null,
@@ -1083,6 +1138,7 @@ function openStop(code) {
     arrivals,
     legend(),
     h('div', { class: 'note', style: 'font-size:12px' }, 'Tap a bus number to see its route · tap Track to follow the next bus coming here.'));
+  setPanelSummary(() => '🚏 ' + st[2] + (state.stopFirst ? ' · ' + state.stopFirst : ''));
   map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
   clearInterval(state.sheetTimer);
   loadArrivals(code);
@@ -1093,16 +1149,16 @@ function legend() {
   return h('div', { class: 'legend' }, h('span', { style: '--c:var(--green)' }, 'Seats'), h('span', { style: '--c:var(--amber)' }, 'Standing'), h('span', { style: '--c:var(--lsd)' }, 'Limited standing'));
 }
 function timePills(buses) {
-  const pills = (buses || []).slice(0, 3).map(b => h('span', { class: 't ' + (b.load || 'NA'), title: LOAD_TXT[b.load] || '' }, fmtMins(minsUntil(Date.parse(b.eta)))));
+  const pills = (buses || []).slice(0, 3).map(b => h('span', { class: 't ' + (b.load || 'NA'), title: LOAD_TXT[b.load] || '' }, fmtMins(minsUntil(parseEta(b.eta)))));
   return pills.length ? pills : [h('span', { class: 'meta' }, 'Not in operation')];
 }
 // Big line for the service you're viewing, e.g. "105 → Jurong East Int: 3 min, then 11 min"
 function renderSelSvc(code, live) {
   const box = $('selSvc'); if (!box || !state.R) return;
   const no = state.R.no, sv = live.find(x => x.ServiceNo === no), buses = sv ? sv.buses : [];
-  const mins = buses.map(b => minsUntil(Date.parse(b.eta)));
-  const first = mins.length ? (mins[0] <= 0 ? 'Arriving' : mins[0] + ' min') : 'No live arrival';
-  const rest = mins.slice(1).map(m => (m <= 0 ? 'Arr' : m + ' min'));
+  const mins = buses.map(b => minsUntil(parseEta(b.eta)));
+  const first = mins.length ? (mins[0] == null ? 'No live time' : mins[0] <= 0 ? 'Arriving' : mins[0] + ' min') : 'No live arrival';
+  const rest = mins.slice(1).filter(m => m != null).map(m => (m <= 0 ? 'Arr' : m + ' min'));
   const b0 = buses[0] || {};
   box.className = 'selsvc'; box.innerHTML = '';
   box.append(
@@ -1124,7 +1180,7 @@ async function loadArrivals(code) {
     const data = await api('/multi-arrival?stops=' + code);
     if (state.sheetStop !== code || !$('arrivals')) return;
     const live = ((data.stops || {})[code] || []).filter(sv => sv.buses && sv.buses.length)
-      .sort((a, b) => Date.parse(a.buses[0].eta) - Date.parse(b.buses[0].eta));
+      .sort((a, b) => (parseEta(a.buses[0].eta) || Infinity) - (parseEta(b.buses[0].eta) || Infinity));
     box.innerHTML = '';
     if (!live.length) box.append(h('div', { class: 'note' }, 'No buses arriving right now (services may have ended for the day).'));
     for (const sv of live) {
@@ -1138,6 +1194,7 @@ async function loadArrivals(code) {
         canTrack ? h('button', { class: 'trackbtn', onclick: () => startWaiting(sv.ServiceNo, code, null) }, 'Track ▶') : null));
     }
     renderSelSvc(code, live);
+    state.stopFirst = live.length ? live[0].ServiceNo + ' in ' + fmtMins(minsUntil(parseEta(live[0].buses[0].eta))) : 'no live arrivals';
     const liveNos = new Set(live.map(x => x.ServiceNo));
     for (const no of all.filter(n => !liveNos.has(n))) {
       box.append(h('div', { class: 'arr off' },
@@ -1335,7 +1392,7 @@ function renderTripPanel() {
   const T = state.trip; if (!T) return;
   tripUI = { next: h('div', { class: 'big' }), alight: h('div', { class: 'sub' }), stops: h('b'), dist: h('b'), eta: h('b'), src: h('div', { class: 'status' }) };
   const simBtn = T.sim ? h('button', { class: 'pill', onclick: e => { const s = T.simState; s.mult = s.mult === 1 ? 4 : s.mult === 4 ? 10 : 1; e.target.textContent = 'Sim ' + s.mult + '×'; } }, 'Sim ' + (T.simState ? T.simState.mult : 4) + '×') : null;
-  setPanel(
+  setPanelKeyed('trip',
     panelHead('On bus ' + T.no + ' → ' + T.R.dest, null, T.no),
     h('div', { class: 'sub' }, 'Next stop'), tripUI.next,
     T.alightIdx != null
@@ -1349,7 +1406,20 @@ function renderTripPanel() {
       simBtn,
       h('button', { class: 'pill', onclick: () => confirmRestart() }, 'End trip')),
     tripUI.src);
+  setPanelSummary(tripSummary);
   updateTripPanel(true);
+}
+function tripSummary() {
+  const T = state.trip; if (!T) return '';
+  const R = T.R, nx = nextStopIdx(R, T.disp);
+  const atIdx = R.stopCh.findIndex(c => Math.abs(c - T.disp) <= 20);
+  let txt = '🚌 ' + T.no + ' · ' + (atIdx >= 0 ? 'At ' + stopName(R.codes[atIdx]) : nx >= 0 ? 'Next: ' + stopName(R.codes[nx]) : 'End of route');
+  if (T.alightIdx != null) {
+    const dist = Math.max(0, R.stopCh[T.alightIdx] - T.disp);
+    const mins = T.ltaEta && !T.sim ? minsUntil(T.ltaEta) : Math.round(dist / Math.max(T.speed || 0, 5) / 60);
+    txt += ' · 🏁 ' + stopsLeft(T) + ' stops' + (mins == null ? '' : ' · ≈' + Math.max(mins, 1) + ' min');
+  }
+  return txt;
 }
 let lastPanelUpdate = 0;
 function updateTripPanel(force) {
@@ -1450,7 +1520,7 @@ function renderConnect(data) {
     const rows = services.map(no => {
       const sv = live.find(x => x.ServiceNo === no);
       const buses = sv ? sv.buses : [];
-      const first = buses[0] ? Date.parse(buses[0].eta) : Infinity;
+      const first = buses[0] && !isNaN(parseEta(buses[0].eta)) ? parseEta(buses[0].eta) : Infinity;
       return { no, buses, first };
     }).sort((a, b) => a.first - b.first || naturalSort(a.no, b.no));
     groups.push(h('div', { class: 'grp' }, stopName(code) + ' ', h('small', null, code + (d > 5 ? ' · ' + fmtDist(d) + ' away' : ' · this stop'))));
@@ -1464,7 +1534,7 @@ function renderConnect(data) {
         h('span', { class: 'meta' }, '›')));
     }
   }
-  setPanel(
+  setPanelKeyed('connect:' + A.code,
     panelHead('You have arrived', null, A.fromNo),
     h('div', { class: 'sub' }, stopName(A.code) + ' (' + A.code + ')'),
     h('div', { class: 'big', style: 'font-size:18px' }, 'Connecting bus? Pick the service you are taking next.'),
@@ -1473,6 +1543,7 @@ function renderConnect(data) {
     legend(),
     h('div', { class: 'row' }, h('button', { class: 'pill', onclick: resetAll }, 'No thanks – finish'),
       data ? h('span', { class: 'meta' }, 'Updated ' + hhmm()) : null));
+  setPanelSummary(() => '📍 Connecting buses at ' + stopName(A.code));
 }
 
 // ======================= WAITING FOR A BUS =======================
@@ -1493,7 +1564,7 @@ let waitUI = null;
 function renderWaitPanel() {
   const W = state.wait; if (!W) return;
   waitUI = { count: h('div', { class: 'big' }, 'Checking…'), info: h('div', { class: 'sub' }), then: h('div', { class: 'sub' }), upd: h('div', { class: 'status' }) };
-  setPanel(
+  setPanelKeyed('wait:' + W.no + ':' + W.code,
     panelHead('Bus ' + W.no + ' → ' + W.R.dest, null, W.no),
     h('div', { class: 'sub' }, 'Waiting at ' + stopName(W.code) + ' (#' + (W.idx + 1) + ')'),
     waitUI.count, waitUI.info, waitUI.then,
@@ -1505,6 +1576,7 @@ function renderWaitPanel() {
       W.fromArrived ? h('button', { class: 'pill', onclick: backToList }, '‹ Back to list') : null,
       h('label', { class: 'check', style: 'margin:0' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = state.simPref; c.onchange = () => state.simPref = c.checked; return c; })(), 'Simulate ride')),
     waitUI.upd, legend());
+  setPanelSummary(() => { const n = W.next, m = n ? minsUntil(parseEta(n.eta)) : null; return '⏱ Bus ' + W.no + (m == null ? ' · waiting for live time' : m <= 0 ? ' arriving now' : ' in ' + m + ' min') + ' · ' + stopName(W.code); });
   updateWaitPanel();
 }
 function updateWaitPanel() {
@@ -1513,10 +1585,10 @@ function updateWaitPanel() {
   if (!W.loaded) return;
   if (!n) { waitUI.count.textContent = 'No live arrival right now'; waitUI.info.textContent = 'The service may not be operating.'; waitUI.then.textContent = ''; }
   else {
-    const m = minsUntil(Date.parse(n.eta));
-    waitUI.count.textContent = m <= 0 ? 'Bus ' + W.no + ' arriving now' : 'Next bus in ' + m + ' min';
+    const m = minsUntil(parseEta(n.eta));
+    waitUI.count.textContent = m == null ? 'No live time for bus ' + W.no : m <= 0 ? 'Bus ' + W.no + ' arriving now' : 'Next bus in ' + m + ' min';
     waitUI.info.textContent = [LOAD_TXT[n.load], TYPE_TXT[n.type], n.feature === 'WAB' ? '♿ Wheelchair accessible' : '', n.lat ? '' : '(position not available)'].filter(Boolean).join(' · ');
-    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(Date.parse(a.eta))) + ' (dark red bus) · ' + (LOAD_TXT[a.load] || '') : '';
+    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(parseEta(a.eta))) + ' (dark red bus) · ' + (LOAD_TXT[a.load] || '') : '';
   }
   waitUI.upd.textContent = 'Updated ' + hhmm();
 }
@@ -1530,7 +1602,7 @@ async function pollWaiting() {
     if (token !== state.pollToken || state.wait !== W) return;
     const now = Date.now();
     mergeVehicles(vehiclesFrom(R, data, now));
-    const atS = ((data.stops || {})[W.code] || []).filter(o => o.eta).sort((x, y) => Date.parse(x.eta) - Date.parse(y.eta));
+    const atS = ((data.stops || {})[W.code] || []).filter(o => o.eta).sort((x, y) => (parseEta(x.eta) || Infinity) - (parseEta(y.eta) || Infinity));
     W.next = atS[0] || null; W.after = atS[1] || null; W.loaded = true;
     const keyOf = o => o && o.lat ? o.lat.toFixed(5) + ',' + o.lng.toFixed(5) : null;
     const k1 = keyOf(W.next), k2 = keyOf(W.after);
