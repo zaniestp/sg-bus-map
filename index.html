@@ -22,6 +22,28 @@
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
+  /* ---------- morning theme ---------- */
+  body[data-theme="morning"] { --card: rgba(255,251,232,0.97); }
+  /* ---------- night theme ---------- */
+  body[data-theme="night"] { --card: rgba(22,28,40,0.96); --ink: #e6e9ef; --muted: #9aa4b5; --shadow: 0 6px 24px rgba(0,0,0,0.55); color: var(--ink); }
+  body[data-theme="night"] #q, body[data-theme="night"] .field { color: var(--ink); background: #1b2230; border-color: #374154; }
+  body[data-theme="night"] .pill, body[data-theme="night"] .hidebtn { background: #263043; border-color: #3a4558; color: var(--ink); }
+  body[data-theme="night"] .pill.primary { background: #3d5afe; border-color: #3d5afe; color: #fff; }
+  body[data-theme="night"] .xbtn, body[data-theme="night"] .btn { background: #2b3446; color: var(--ink); }
+  body[data-theme="night"] .btn.primary { background: #3d5afe; color: #fff; }
+  body[data-theme="night"] .dlg, body[data-theme="night"] #results { background: #1b2230; color: var(--ink); }
+  body[data-theme="night"] .reshead { background: #151b27; }
+  body[data-theme="night"] .res, body[data-theme="night"] .arr, body[data-theme="night"] .stopitem, body[data-theme="night"] .stoplist { border-color: #2c3546; }
+  body[data-theme="night"] .kpi { background: #222b3b; }
+  body[data-theme="night"] .kpi b, body[data-theme="night"] .grp, body[data-theme="night"] .pbar .sum, body[data-theme="night"] .selsvc .bigm, body[data-theme="night"] .dirbtn b { color: #a9c6ff; }
+  body[data-theme="night"] .selsvc { background: #1d2740; border-color: #3d5afe; }
+  body[data-theme="night"] .dirbtn { background: #1b2230; color: var(--ink); border-color: #3d5afe; }
+  body[data-theme="night"] .err { background: #3a1d22; color: #ffb4b4; }
+  body[data-theme="night"] .iconbtn { color: var(--ink); }
+  body[data-theme="night"] .iconbtn.primary { color: #fff; }
+  body[data-theme="night"] #loading { background: rgba(11,18,32,.9); color: var(--ink); }
+  body[data-theme="night"] .maplibregl-ctrl-attrib { background: rgba(22,28,40,.8); color: #9aa4b5; }
+  body[data-theme="night"] .maplibregl-ctrl-attrib a { color: #a9c6ff; }
   html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); overscroll-behavior: none; }
   #map { position: fixed; inset: 0; }
   button { font-family: inherit; }
@@ -192,6 +214,13 @@
     <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
     <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
     <div id="testResult"></div>
+    <h2 style="margin-top:14px">Theme</h2>
+    <select id="themeSel" class="field">
+      <option value="auto">Auto (morning yellow · afternoon white · night dark)</option>
+      <option value="morning">Morning – bright yellow</option>
+      <option value="afternoon">Afternoon – normal white</option>
+      <option value="night">Night – dark</option>
+    </select>
     <div class="row">
       <button class="btn" id="testBtn">Test</button>
       <button class="btn" id="cancelBtn">Cancel</button>
@@ -224,7 +253,7 @@ const DATA_BASES = [
   'https://raw.githubusercontent.com/cheeaun/sgbusdata/main/data/v1/'
 ];
 const COLORS = {
-  bus: '#e01b24', busRoof: '#ff5252', bus2: '#7f1d1d', bus2Roof: '#a33a3a',
+  bus: '#a3e635', busRoof: '#d9f99d', bus2: '#3f6212', bus2Roof: '#65a30d',   // lime = buses of the service you track
   stop: '#0d2c6c', stopPassed: '#8b9bb4'
 };
 // ======================================================
@@ -454,12 +483,93 @@ function buildTrees(R) {
       const off = 9 + hash(n) * 2.5, along = (hash(n + 3) - 0.5) * 4, s = 0.8 + hash(n + 5) * 0.45;
       const x = c[0] + r[0] * side * off + f[0] * along, y = c[1] + r[1] * side * off + f[1] * along;
       const g = greens[Math.floor(hash(n + 9) * greens.length)], rot = hash(n + 11) * Math.PI;
-      feats.push(polyFeature(ngon(x, y, 0.3 * s, rot, 4), 0, 2.4 * s, '#6d4c41'));
-      feats.push(polyFeature(ngon(x, y, 2.4 * s, rot), 2.0 * s, 4.7 * s, g[0]));
-      feats.push(polyFeature(ngon(x, y, 1.6 * s, rot + 0.3), 4.7 * s, 6.4 * s, g[1]));
+      for (const ft of [polyFeature(ngon(x, y, 0.3 * s, rot, 4), 0, 2.4 * s, '#6d4c41'), polyFeature(ngon(x, y, 2.4 * s, rot), 2.0 * s, 4.7 * s, g[0]), polyFeature(ngon(x, y, 1.6 * s, rot + 0.3), 4.7 * s, 6.4 * s, g[1])]) {
+        ft.properties.cm = themeColor(ft.properties.c, 'morning', 'ext'); ft.properties.cn = themeColor(ft.properties.c, 'night', 'ext');
+        feats.push(ft);
+      }
     }
   }
   return feats;
+}
+// ---------- colour helpers (themes) ----------
+function hsl2rgb(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  if (!s) { const v = Math.round(l * 255); return [v, v, v]; }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = t => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)];
+}
+function rgb2hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+function parseColor(str) {
+  if (typeof str !== 'string') return null;
+  const s = str.trim().toLowerCase(); let m;
+  if ((m = s.match(/^#([0-9a-f]{3,8})$/))) {
+    let hx = m[1]; if (hx.length <= 4) hx = hx.split('').map(c => c + c).join('');
+    if (hx.length !== 6 && hx.length !== 8) return null;
+    const n = parseInt(hx.slice(0, 6), 16);
+    return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255, a: hx.length === 8 ? parseInt(hx.slice(6), 16) / 255 : 1 };
+  }
+  if ((m = s.match(/^rgba?\(([^)]+)\)$/))) { const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat); return { r: p[0], g: p[1], b: p[2], a: p[3] == null ? 1 : p[3] }; }
+  if ((m = s.match(/^hsla?\(([^)]+)\)$/))) { const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat); const [r, g, b] = hsl2rgb(p[0], p[1] / 100, p[2] / 100); return { r, g, b, a: p[3] == null ? 1 : p[3] }; }
+  return null;
+}
+function cssColor(c) { return `rgba(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)},${+c.a.toFixed(3)})`; }
+// role: fill | ext (3D) | line | text | halo
+function themeColor(str, theme, role) {
+  const c = parseColor(str); if (!c || theme === 'afternoon') return str;
+  let [hh, ss, ll] = rgb2hsl(c.r, c.g, c.b);
+  if (theme === 'morning') {
+    const mix = { fill: 0.22, ext: 0.2, line: 0.12, halo: 0.45, text: 0 }[role] || 0;
+    if (!mix) return str;
+    return cssColor({ r: c.r + (255 - c.r) * mix, g: c.g + (213 - c.g) * mix, b: c.b + (74 - c.b) * mix, a: c.a });   // blend towards warm yellow #ffd54a
+  }
+  // night
+  const water = hh >= 180 && hh <= 250 && ss > 0.2;
+  if (role === 'fill') { ll = water ? 0.11 + 0.07 * ll : 0.06 + 0.08 * ll; ss *= water ? 0.6 : 0.35; }
+  else if (role === 'ext') { ll = 0.2 + 0.16 * ll; ss *= 0.4; }
+  else if (role === 'line') { ll = 0.17 + 0.25 * ll; ss *= 0.5; }
+  else if (role === 'text') { ll = Math.max(0.62, 1 - 0.7 * ll); ss *= 0.5; }
+  else if (role === 'halo') { ll = 0.07; ss *= 0.3; }
+  const [r, g, b] = hsl2rgb(hh, ss, ll);
+  return cssColor({ r, g, b, a: c.a });
+}
+function themeWalk(v, fn) {
+  if (typeof v === 'string') return parseColor(v) ? fn(v) : v;
+  if (Array.isArray(v)) return v.map(x => themeWalk(x, fn));
+  return v;
+}
+
+// ---------- 3D bus shelter (roof, glass, bench, sign pole) ----------
+// stopXY = stop position, roadXY = nearest point on the bus route, th = road heading
+function shelterParts(stopXY, roadXY, th) {
+  const f = [Math.sin(th), Math.cos(th)], r = [Math.cos(th), -Math.sin(th)];
+  const ox = stopXY[0] - roadXY[0], oy = stopXY[1] - roadXY[1], d = Math.hypot(ox, oy);
+  const side = d > 1 ? ((ox * r[0] + oy * r[1]) >= 0 ? 1 : -1) : -1;     // no offset known → kerb on the left
+  const n = [r[0] * side, r[1] * side];                                  // points away from the road
+  const c = [stopXY[0] + n[0] * 1.5, stopXY[1] + n[1] * 1.5];
+  const box = (a0, a1, b0, b1, base, top, col) => {
+    const f3 = polyFeature([[a0, b0], [a1, b0], [a1, b1], [a0, b1]].map(([a, b]) => [c[0] + f[0] * a + n[0] * b, c[1] + f[1] * a + n[1] * b]), base, top, col);
+    f3.properties.cm = themeColor(col, 'morning', 'ext'); f3.properties.cn = themeColor(col, 'night', 'ext');
+    return f3;
+  };
+  const glass = '#cfe3f5', metal = '#8f969c';
+  return [
+    box(-3, 3, -1.25, 1.25, 2.55, 2.75, '#a7adb2'),                        // roof
+    box(-2.75, -2.6, 0.95, 1.12, 0, 2.6, metal), box(2.6, 2.75, 0.95, 1.12, 0, 2.6, metal),   // posts
+    box(-2.55, 2.55, 0.98, 1.05, 0.35, 2.4, glass),                        // back glass
+    box(2.5, 2.57, -0.35, 1.0, 0.35, 2.4, glass),                          // side glass
+    box(-1.6, 1.6, 0.45, 0.88, 0.42, 0.52, '#8d6e63'),                     // bench
+    box(-1.5, -1.4, 0.6, 0.7, 0, 0.42, '#5d4037'), box(1.4, 1.5, 0.6, 0.7, 0, 0.42, '#5d4037'),
+    box(-3.62, -3.52, -1.05, -0.95, 0, 2.8, metal),                        // sign pole
+    box(-3.6, -3.54, -1.3, -0.7, 1.95, 2.75, '#c0d94a')                    // sign plate
+  ];
 }
 // ==PURE-END==
 
@@ -589,7 +699,8 @@ function addLayers() {
       }
     });
   }
-  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop', 'road-stops']) {
+  captureBaseColors();
+  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop', 'road-stops', 'shelters']) {
     map.addSource(id, { type: 'geojson', data: emptyFC() });
   }
   map.addLayer({ id: 'all-stops', type: 'circle', source: 'all-stops', minzoom: 15,
@@ -600,16 +711,19 @@ function addLayers() {
     paint: { 'line-color': '#3d5afe', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 17, 10] } });
   map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 15,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
+  map.addLayer({ id: 'shelters', type: 'fill-extrusion', source: 'shelters', minzoom: 15.5,
+    paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'buses', type: 'fill-extrusion', source: 'buses',
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'bus-ring', type: 'circle', source: 'bus-pts', filter: ['==', ['get', 'mine'], true],
-    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(255,196,0,0.18)',
-             'circle-stroke-color': '#ffc400', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(163,230,53,0.22)',
+             'circle-stroke-color': '#4d7c0f', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
   map.addLayer({ id: 'bus-dot', type: 'circle', source: 'bus-pts', maxzoom: 14.5,
-    paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+    paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#1a2e05', 'circle-stroke-width': 2 } });
   map.addLayer({ id: 'route-stops', type: 'circle', source: 'route-stops',
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, ['match', ['get', 'status'], 'next', 10, 'alight', 11, 'board', 11, 8], 17, 13],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, ['match', ['get', 'status'], 'next', 10, 'alight', 11, 'board', 11, 8],
+                        15.5, ['match', ['get', 'status'], 'next', 11, 'alight', 12, 'board', 12, 10], 16.5, 7, 18, 7],   // shrinks to a badge once 3D shelters show
       'circle-color': ['match', ['get', 'status'], 'passed', COLORS.stopPassed, COLORS.stop],
       'circle-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1],
       'circle-stroke-color': ['match', ['get', 'status'], 'alight', '#ffc400', 'board', '#00e676', 'next', '#82b1ff', '#ffffff'],
@@ -617,7 +731,7 @@ function addLayers() {
       'circle-stroke-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1]
     } });
   map.addLayer({ id: 'route-stops-label', type: 'symbol', source: 'route-stops', minzoom: 13.5,
-    layout: { 'text-field': ['to-string', ['get', 'seq']], 'text-font': ['Noto Sans Bold'], 'text-size': 11,
+    layout: { 'text-field': ['to-string', ['get', 'seq']], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 11, 16.5, 9],
               'text-allow-overlap': true, 'text-ignore-placement': true },
     paint: { 'text-color': '#ffffff' } });
   map.addLayer({ id: 'route-stops-name', type: 'symbol', source: 'route-stops', minzoom: 15,
@@ -628,14 +742,15 @@ function addLayers() {
   map.addLayer({ id: 'bus-label', type: 'symbol', source: 'bus-pts', minzoom: 14.5,
     layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-offset': [0, -3.2],
               'text-allow-overlap': true },
-    paint: { 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 } });
+    paint: { 'text-color': ['coalesce', ['get', 'tcolor'], '#ffffff'], 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 } });
   map.addLayer({ id: 'road-stops', type: 'circle', source: 'road-stops',
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 16, 10], 'circle-color': '#ff9100', 'circle-stroke-color': '#0d2c6c', 'circle-stroke-width': 2.5 } });
   map.addLayer({ id: 'me', type: 'circle', source: 'me',
     paint: { 'circle-radius': 7, 'circle-color': '#1a73e8', 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
   map.addLayer({ id: 'sel-stop', type: 'circle', source: 'sel-stop',
-    paint: { 'circle-radius': 18, 'circle-color': 'rgba(0,229,255,0.15)', 'circle-stroke-color': '#00b8d4', 'circle-stroke-width': 4 } });
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 18, 17, 26, 20, 60], 'circle-color': 'rgba(0,229,255,0.08)', 'circle-stroke-color': '#00b8d4', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });   // flat ring around the shelter
 
+  refreshTheme(true);
   map.on('click', onMapClick);
   for (const id of ['route-stops', 'all-stops']) {
     map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
@@ -655,6 +770,53 @@ function addLayers() {
 }
 
 function setLayerVisible(id, on) { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); }
+
+// ======================= time-of-day theme =======================
+const COLOR_PROPS = {
+  'background-color': 'fill', 'fill-color': 'fill', 'fill-outline-color': 'fill', 'fill-extrusion-color': 'ext',
+  'line-color': 'line', 'text-color': 'text', 'icon-color': 'text', 'text-halo-color': 'halo', 'icon-halo-color': 'halo',
+  'circle-color': 'fill', 'circle-stroke-color': 'line'
+};
+const baseColors = [];
+function captureBaseColors() {                      // remember the map style's own colours once
+  baseColors.length = 0;
+  const byType = {
+    background: ['background-color'], fill: ['fill-color', 'fill-outline-color'], 'fill-extrusion': ['fill-extrusion-color'],
+    line: ['line-color'], symbol: ['text-color', 'text-halo-color', 'icon-color', 'icon-halo-color'], circle: ['circle-color', 'circle-stroke-color']
+  };
+  for (const layer of map.getStyle().layers) for (const prop of byType[layer.type] || []) {
+    let v; try { v = map.getPaintProperty(layer.id, prop); } catch { v = undefined; }
+    if (v !== undefined) baseColors.push([layer.id, prop, v]);
+  }
+}
+function autoTheme(d = new Date()) { const hr = d.getHours(); return hr >= 6 && hr < 12 ? 'morning' : hr >= 12 && hr < 19 ? 'afternoon' : 'night'; }
+function themeChoice() { return store.get('theme') || 'auto'; }
+function refreshTheme(force) {
+  const c = themeChoice(), t = c === 'auto' ? autoTheme() : c;
+  if (force || t !== state.theme) applyTheme(t);
+}
+function applyTheme(t) {
+  state.theme = t;
+  document.body.dataset.theme = t;
+  if (!map.getLayer('route-line')) return;
+  for (const [id, prop, v] of baseColors) {
+    try { map.setPaintProperty(id, prop, t === 'afternoon' ? v : themeWalk(v, c => themeColor(c, t, COLOR_PROPS[prop]))); } catch {}
+  }
+  const night = t === 'night', key = t === 'morning' ? 'cm' : night ? 'cn' : 'c';
+  for (const id of ['trees', 'shelters']) map.setPaintProperty(id, 'fill-extrusion-color', ['coalesce', ['get', key], ['get', 'c']]);
+  map.setPaintProperty('route-casing', 'line-color', night ? '#0b1220' : t === 'morning' ? '#fff6d6' : '#ffffff');
+  map.setPaintProperty('route-line', 'line-color', night ? '#6f86ff' : '#3d5afe');
+  map.setPaintProperty('route-stops-name', 'text-color', night ? '#a9c6ff' : COLORS.stop);
+  map.setPaintProperty('route-stops-name', 'text-halo-color', night ? '#0b1220' : '#ffffff');
+  map.setPaintProperty('all-stops', 'circle-color', night ? '#1f2937' : '#ffffff');
+  try {
+    map.setLight({ anchor: 'viewport', position: [1.3, 210, 35],
+      color: t === 'morning' ? '#ffe7a3' : night ? '#e3e9f7' : '#ffffff',      // near-white at night keeps lime buses bright
+      intensity: t === 'morning' ? 0.45 : night ? 0.3 : 0.4 });
+  } catch {}
+  const mc = document.querySelector('meta[name="theme-color"]'); if (mc) mc.content = night ? '#0b1220' : t === 'morning' ? '#b8860b' : '#0d2c6c';
+}
+setInterval(() => refreshTheme(false), 60000);
 
 // ======================= init =======================
 (async function init() {
@@ -812,6 +974,7 @@ function renderRoute(R, opts = {}) {
   map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: R.ll }, properties: {} });
   if (!R.trees) R.trees = { type: 'FeatureCollection', features: buildTrees(R) };
   map.getSource('trees').setData(R.trees);
+  updateShelters(state.sheetStop);
   state.stopSig = '';
   updateStops(true);
   if (opts.fit) {
@@ -821,9 +984,31 @@ function renderRoute(R, opts = {}) {
 }
 function clearRoute() {
   state.R = null; state.vehicles = []; state.stopSig = ''; state.drewEmpty = true;
-  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop', 'road-stops']) map.getSource(id) && map.getSource(id).setData(emptyFC());
+  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop', 'road-stops', 'shelters']) map.getSource(id) && map.getSource(id).setData(emptyFC());
   for (const k of Object.keys(state.markers)) { if (state.markers[k]) state.markers[k].remove(); state.markers[k] = null; }
 }
+// ---------- 3D shelters for route stops + the tapped stop ----------
+function stopShelters(code, R, idx) {
+  const ll = stopLL(code); if (!ll || !R) return [];
+  const p = toXY(ll);
+  let ch = idx != null ? R.stopCh[idx] : null;
+  if (ch == null || Math.hypot(...[0, 1].map(k => p[k] - xyAt(R, ch)[k])) > 60) ch = projectRange(R, p).ch;   // data gap fallback
+  return shelterParts(p, xyAt(R, ch), headingAt(R, ch, 10));
+}
+function routeShelters(R) {
+  if (!R.shelters) R.shelters = R.codes.flatMap((c, i) => stopShelters(c, R, i));
+  return R.shelters;
+}
+function updateShelters(extraCode) {
+  const src = map.getSource('shelters'); if (!src) return;
+  let feats = state.R ? routeShelters(state.R) : [];
+  if (extraCode && !(state.R && state.R.idxOf[extraCode])) {
+    const no = (state.stopServices[extraCode] || [])[0];
+    if (no) { const d = state.services[no].routes.findIndex(r => r.includes(extraCode)); const R = getRoute(no, Math.max(0, d)); feats = feats.concat(stopShelters(extraCode, R, R.codes.indexOf(extraCode))); }
+  }
+  src.setData({ type: 'FeatureCollection', features: feats });
+}
+
 // stop status: passed / next / alight / board / normal
 function stopStatuses() {
   const R = state.R; if (!R) return [];
@@ -950,7 +1135,7 @@ function frame(ts) {
     if (v.role === 'hidden' || state.mode === 'onboard') continue;
     const second = v.role === 'second';
     feats.push(...busParts(R, v.disp, { color: second ? COLORS.bus2 : COLORS.bus, roof: second ? COLORS.bus2Roof : COLORS.busRoof, dd: v.type === 'DD', bendy: v.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: second ? COLORS.bus2 : COLORS.bus } });
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: second ? COLORS.bus2 : COLORS.bus, tcolor: second ? '#ffffff' : '#1a2e05' } });
   }
   if (state.mode === 'onboard' && state.trip) {
     const T = state.trip;
@@ -958,7 +1143,7 @@ function frame(ts) {
     if (busy) { tripProgress(); return; }
     const mv = state.vehicles.find(v => v.id === T.myVid);
     feats.push(...busParts(R, T.disp, { color: COLORS.bus, roof: COLORS.busRoof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.bus, mine: true } });
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.bus, tcolor: '#1a2e05', mine: true } });
     if (T.follow) followCam(now);
     tripProgress();
     if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
@@ -1128,6 +1313,7 @@ function openStop(code) {
   const st = state.stops[code]; if (!st) return;
   state.sheetStop = code;
   map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [st[0], st[1]] }, properties: {} });
+  updateShelters(code);
   const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading live arrivals…'));
   state.stopFirst = null;
   setPanelKeyed('stop:' + code,
@@ -1588,7 +1774,7 @@ function updateWaitPanel() {
     const m = minsUntil(parseEta(n.eta));
     waitUI.count.textContent = m == null ? 'No live time for bus ' + W.no : m <= 0 ? 'Bus ' + W.no + ' arriving now' : 'Next bus in ' + m + ' min';
     waitUI.info.textContent = [LOAD_TXT[n.load], TYPE_TXT[n.type], n.feature === 'WAB' ? '♿ Wheelchair accessible' : '', n.lat ? '' : '(position not available)'].filter(Boolean).join(' · ');
-    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(parseEta(a.eta))) + ' (dark red bus) · ' + (LOAD_TXT[a.load] || '') : '';
+    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(parseEta(a.eta))) + ' (dark green bus) · ' + (LOAD_TXT[a.load] || '') : '';
   }
   waitUI.upd.textContent = 'Updated ' + hhmm();
 }
@@ -1661,7 +1847,8 @@ function resetAll() {
   toast('Restarted');
 }
 
-$('settingsBtn').onclick = () => { $('apiInput').value = API; $('testResult').textContent = ''; $('settings').hidden = false; };
+$('settingsBtn').onclick = () => { $('apiInput').value = API; $('themeSel').value = themeChoice(); $('testResult').textContent = ''; $('settings').hidden = false; };
+$('themeSel').onchange = () => { store.set('theme', $('themeSel').value); refreshTheme(true); };
 $('cancelBtn').onclick = () => $('settings').hidden = true;
 $('saveBtn').onclick = () => {
   API = $('apiInput').value.trim().replace(/\/+$/, '');
