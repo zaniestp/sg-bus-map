@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d2c6c">
+<title>SG Bus 3D</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --blue: #0d2c6c;
+    --red: #e01b24;
+    --ink: #1b1b1f;
+    --muted: #6b6b76;
+    --card: rgba(255,255,255,0.97);
+    --shadow: 0 6px 24px rgba(0,0,0,0.18);
+    --green: #00c853;
+    --amber: #ff9100;
+    --lsd: #ff1744;
+    --gold: #ffc400;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); overscroll-behavior: none; }
+  #map { position: fixed; inset: 0; }
+  button { font-family: inherit; }
+
+  /* ---------- top bar ---------- */
+  #topbar { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px; display: flex; gap: 8px; z-index: 5; }
+  #searchForm { flex: 1; display: flex; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; min-width: 0; }
+  #q { flex: 1; border: 0; padding: 12px 14px; font-size: 17px; outline: none; background: transparent; min-width: 0; }
+  #searchForm button { border: 0; background: var(--blue); color: #fff; font-weight: 700; font-size: 16px; padding: 0 14px; cursor: pointer; }
+  #modeChip { flex: 1; display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); padding: 0 12px; font-weight: 600; font-size: 15px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .iconbtn { border: 0; border-radius: 14px; box-shadow: var(--shadow); background: var(--card); color: var(--ink); width: 46px; min-height: 46px; font-size: 20px; cursor: pointer; flex: none; }
+  .iconbtn.primary { background: var(--red); color: #fff; }
+
+  /* ---------- route bar (browse) ---------- */
+  #routeBar { position: fixed; top: calc(66px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 4; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); padding: 10px 12px; }
+  .rtitle { display: flex; align-items: center; gap: 10px; }
+  .svcbadge { background: var(--blue); color: #fff; font-weight: 800; border-radius: 8px; padding: 3px 9px; font-size: 17px; flex: none; }
+  .svcbadge.red { background: var(--red); }
+  #routeDir { font-size: 14px; line-height: 1.25; min-width: 0; }
+  #routeDir small { color: var(--muted); display: block; }
+  .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .pill { border: 1px solid #ddd; background: #fff; border-radius: 999px; padding: 7px 12px; font-size: 14px; cursor: pointer; color: var(--ink); }
+  .pill.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .pill.red { background: var(--red); color: #fff; border-color: var(--red); }
+  #liveStatus { font-size: 13px; color: var(--muted); flex: 1; }
+
+  /* ---------- bottom panel ---------- */
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,0.2); max-height: 60vh; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); }
+  #panel[hidden] { display: none; }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: #ccc; margin: 0 auto 8px; }
+  .phead { display: flex; align-items: flex-start; gap: 10px; }
+  .phead h2 { margin: 0; font-size: 19px; flex: 1; line-height: 1.25; }
+  .sub { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
+  .xbtn { border: 0; background: #eee; border-radius: 50%; width: 34px; height: 34px; font-size: 16px; cursor: pointer; flex: none; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 0; background: #0b7a75; color: #fff; font-weight: 700; border-radius: 8px; padding: 6px 10px; font-size: 15px; cursor: pointer; min-width: 48px; text-align: center; }
+  .chip.current { background: var(--blue); outline: 3px solid var(--gold); }
+  .arr { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .arr.tap { cursor: pointer; }
+  .arr .info { flex: 1; min-width: 0; }
+  .arr .dest { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .times { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
+  .t { border-radius: 7px; padding: 3px 7px; font-weight: 700; font-size: 13px; color: #fff; min-width: 42px; text-align: center; }
+  .SEA { background: var(--green); } .SDA { background: var(--amber); } .LSD { background: var(--lsd); } .NA { background: #9e9e9e; }
+  .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .note { font-size: 14px; color: var(--muted); padding: 6px 0; }
+  .legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; background: var(--c); }
+  .grp { margin-top: 10px; font-weight: 700; font-size: 14px; color: var(--blue); }
+  .grp small { color: var(--muted); font-weight: 400; }
+  .field { width: 100%; padding: 11px 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 10px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 10px; color: var(--muted); }
+  .stoplist { max-height: 34vh; overflow-y: auto; margin-top: 8px; border-top: 1px solid #eee; }
+  .stopitem { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid #eee; cursor: pointer; }
+  .seq { background: var(--blue); color: #fff; font-weight: 700; font-size: 12px; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .stopitem .nm { flex: 1; font-size: 15px; }
+  .stopitem .nm small { display: block; color: var(--muted); font-size: 12px; }
+  .big { font-size: 22px; font-weight: 800; margin: 4px 0; line-height: 1.2; }
+  .kpis { display: flex; gap: 8px; margin: 8px 0; }
+  .kpi { flex: 1; background: #f1f4fa; border-radius: 12px; padding: 8px; text-align: center; }
+  .kpi b { display: block; font-size: 20px; color: var(--blue); }
+  .kpi span { font-size: 12px; color: var(--muted); }
+  .dirbtn { display: block; width: 100%; text-align: left; margin-top: 8px; border: 2px solid var(--blue); background: #fff; border-radius: 12px; padding: 12px; font-size: 15px; cursor: pointer; }
+  .dirbtn b { color: var(--blue); }
+  .status { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+  /* ---------- alert banner ---------- */
+  #alertBox { position: fixed; left: 12px; right: 12px; top: calc(70px + env(safe-area-inset-top)); z-index: 30; background: var(--gold); color: #1b1b1f; border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35); animation: pop .25s ease-out; }
+  #alertBox[hidden] { display: none; }
+  #alertBox.red { background: var(--red); color: #fff; }
+  #alertBox h2 { margin: 0 0 4px; font-size: 22px; }
+  #alertBox p { margin: 0 0 10px; font-size: 15px; }
+  @keyframes pop { from { transform: scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* ---------- map markers ---------- */
+  .pulse { width: 46px; height: 46px; border-radius: 50%; border: 4px solid #2962ff; animation: pulse 1.4s ease-out infinite; pointer-events: none; }
+  @keyframes pulse { from { transform: scale(.5); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+  .flag { background: var(--gold); color: #1b1b1f; font-weight: 800; font-size: 12px; padding: 4px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.3); white-space: nowrap; pointer-events: none; }
+  .flag.board { background: var(--green); color: #fff; }
+
+  /* ---------- floating buttons ---------- */
+  #fabs { position: fixed; right: 10px; z-index: 5; display: flex; flex-direction: column; gap: 8px; bottom: calc(24px + env(safe-area-inset-bottom)); transition: bottom .2s; }
+  #followBtn { background: var(--blue); color: #fff; }
+
+  /* ---------- modals ---------- */
+  .modal { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal[hidden] { display: none; }
+  .dlg { background: #fff; border-radius: 16px; padding: 18px; width: 100%; max-width: 440px; box-shadow: var(--shadow); }
+  .dlg h2 { margin: 0 0 6px; font-size: 18px; }
+  .dlg p { font-size: 14px; color: var(--muted); margin: 0 0 10px; }
+  .dlg .row { justify-content: flex-end; margin-top: 12px; }
+  .btn { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 600; cursor: pointer; background: #eee; }
+  .btn.primary { background: var(--blue); color: #fff; }
+  .btn.red { background: var(--red); color: #fff; }
+  #testResult { font-size: 13px; margin-top: 8px; min-height: 18px; }
+
+  #toast { position: fixed; left: 50%; top: calc(70px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 50; background: #222; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; }
+  #toast.show { opacity: .95; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 60; background: rgba(255,255,255,.85); font-size: 16px; padding: 20px; text-align: center; }
+  .maplibregl-ctrl-bottom-left { bottom: env(safe-area-inset-bottom); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="topbar">
+  <form id="searchForm" autocomplete="off">
+    <input id="q" list="svcList" placeholder="Bus no. e.g. 105" aria-label="Bus service number">
+    <button type="submit">Go</button>
+  </form>
+  <div id="modeChip" hidden></div>
+  <datalist id="svcList"></datalist>
+  <button id="onBusBtn" class="iconbtn primary" title="I'm on a bus" aria-label="I'm on a bus">🚌</button>
+  <button id="restartBtn" class="iconbtn" title="Restart everything" aria-label="Restart">↺</button>
+  <button id="settingsBtn" class="iconbtn" title="Settings" aria-label="Settings">⚙</button>
+</div>
+
+<div id="routeBar" hidden>
+  <div class="rtitle"><span class="svcbadge" id="routeNo"></span><div id="routeDir"></div></div>
+  <div class="row">
+    <button class="pill" id="dirBtn">⇄ Other direction</button>
+    <span id="liveStatus"></span>
+    <button class="pill" id="clearBtn" aria-label="Clear route">✕</button>
+  </div>
+</div>
+
+<div id="fabs">
+  <button id="followBtn" class="iconbtn" hidden title="Follow bus">⌖</button>
+  <button id="locateBtn" class="iconbtn" title="My location">◎</button>
+</div>
+
+<div id="panel" hidden></div>
+
+<div id="alertBox" hidden>
+  <h2 id="alertTitle"></h2>
+  <p id="alertText"></p>
+  <button class="btn" id="alertOk">OK</button>
+</div>
+
+<div id="settings" class="modal" hidden>
+  <div class="dlg">
+    <h2>Live data proxy</h2>
+    <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
+    <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
+    <div id="testResult"></div>
+    <div class="row">
+      <button class="btn" id="testBtn">Test</button>
+      <button class="btn" id="cancelBtn">Cancel</button>
+      <button class="btn primary" id="saveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirmRestart" class="modal" hidden>
+  <div class="dlg">
+    <h2>Restart everything?</h2>
+    <p>This clears the current trip, route, alerts and connecting-bus panel. Your proxy setting is kept.</p>
+    <div class="row">
+      <button class="btn" id="restartNo">Cancel</button>
+      <button class="btn red" id="restartYes">Restart</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="loading">Loading bus data…</div>
+
+<script>
+// ======================= CONFIG =======================
+const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
+const POLL_MS = 20000;          // live data refresh
+const ALERT_STOPS = 2;          // first alight alert, stops before your stop
+const DATA_BASES = [
+  'https://cdn.jsdelivr.net/gh/cheeaun/sgbusdata@main/data/v1/',
+  'https://raw.githubusercontent.com/cheeaun/sgbusdata/main/data/v1/'
+];
+const COLORS = {
+  bus: '#e01b24', busRoof: '#ff5252', bus2: '#7f1d1d', bus2Roof: '#a33a3a',
+  stop: '#0d2c6c', stopPassed: '#8b9bb4'
+};
+// ======================================================
+
+// ==PURE-START==  (pure maths: route geometry, schedules, 3D shapes)
+const LNG0 = 103.8, LAT0 = 1.35;
+const KX = 111320 * Math.cos(LAT0 * Math.PI / 180), KY = 110574;
+function toXY(ll) { return [(ll[0] - LNG0) * KX, (ll[1] - LAT0) * KY]; }
+function toLL(p) { return [p[0] / KX + LNG0, p[1] / KY + LAT0]; }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// Google encoded polyline (precision 5, lat/lng) → [[lng, lat], ...]
+function decodePolyline(str) {
+  let i = 0, lat = 0, lng = 0; const out = [];
+  while (i < str.length) {
+    for (let k = 0; k < 2; k++) {
+      let shift = 0, result = 0, b;
+      do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const d = (result & 1) ? ~(result >> 1) : (result >> 1);
+      if (k === 0) lat += d; else lng += d;
+    }
+    out.push([lng / 1e5, lat / 1e5]);
+  }
+  return out;
+}
+
+// Build a route object with cumulative distance ("chainage") and stop chainages
+function makeRoute(lineLL, stopLL, checked) {
+  const ends = stopLL.filter(Boolean);
+  if (!checked && lineLL.length > 1 && ends.length > 1) {
+    // Some dataset lines are stored opposite to the stop order: compare the ends & flip
+    const d = (a, b) => { const p = toXY(a), q = toXY(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); };
+    const s0 = ends[0], s1 = ends[ends.length - 1], l0 = lineLL[0], l1 = lineLL[lineLL.length - 1];
+    if (d(s0, l1) + d(s1, l0) + 200 < d(s0, l0) + d(s1, l1)) lineLL = lineLL.slice().reverse();
+  }
+  const xy = [], ll = [];
+  for (const p of lineLL) {
+    const q = toXY(p), l = xy[xy.length - 1];
+    if (l && Math.hypot(q[0] - l[0], q[1] - l[1]) < 0.5) continue;
+    xy.push(q); ll.push(p);
+  }
+  if (xy.length === 1) { xy.push([xy[0][0] + 1, xy[0][1]]); ll.push(toLL(xy[1])); }
+  const cum = [0];
+  for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
+  const R = { xy, ll, cum, length: cum[cum.length - 1] };
+  R.stopCh = placeStops(R, stopLL);
+  return R;
+}
+// Place stops along the route in order. Every pass of the route near a stop is a
+// candidate; dynamic programming picks the in-order combination closest overall.
+function placeStops(R, stopLL) {
+  const nSeg = R.xy.length - 1;
+  const cands = stopLL.map(p => {
+    if (!p) return null;
+    const q = toXY(p), list = [];
+    let run = null, best = null;
+    for (let i = 0; i < nSeg; i++) {
+      const r = projSeg(R, q, i);
+      if (!best || r.d < best.d) best = r;
+      if (r.d <= 80) { if (!run || r.d < run.d) run = r; }
+      else if (run) { list.push(run); run = null; }
+    }
+    if (run) list.push(run);
+    if (!list.length) list.push(best);
+    return list;
+  });
+  // the first stop may always sit at the start of the line, the last at the end
+  const endCand = (i, ch) => { if (cands[i]) { const e = xyAt(R, ch), q = toXY(stopLL[i]); cands[i].push({ ch, d: Math.hypot(q[0] - e[0], q[1] - e[1]) }); } };
+  if (stopLL.length) { endCand(0, 0); endCand(stopLL.length - 1, R.length); }
+  const n = stopLL.length, cost = [], back = [];
+  let prevList = [{ ch: 0, d: 0 }], prevCost = [0];
+  for (let i = 0; i < n; i++) {
+    const list = cands[i] || prevList.map(c => ({ ch: c.ch, d: 0 }));
+    const ci = [], bi = [];
+    list.forEach((c, k) => {
+      let bc = Infinity, bj = 0;
+      prevList.forEach((pc, j) => {
+        const pen = c.ch + 5 >= pc.ch ? 0 : 5000;              // must not go backwards
+        const v = prevCost[j] + pen;
+        if (v < bc) { bc = v; bj = j; }
+      });
+      ci.push(bc + c.d); bi.push(bj);
+    });
+    cost.push(ci); back.push(bi); cands[i] = list;
+    prevList = list; prevCost = ci;
+  }
+  const out = new Array(n);
+  let k = prevCost.indexOf(Math.min(...prevCost));
+  for (let i = n - 1; i >= 0; i--) { out[i] = cands[i][k].ch; k = back[i][k]; }
+  for (let i = 1; i < n; i++) if (out[i] < out[i - 1]) out[i] = out[i - 1];
+  return out;
+}
+function projSeg(R, p, i) {
+  const a = R.xy[i], b = R.xy[i + 1];
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2 : 0;
+  t = clamp(t, 0, 1);
+  const x = a[0] + t * dx, y = a[1] + t * dy;
+  return { seg: i, ch: R.cum[i] + t * Math.sqrt(L2), d: Math.hypot(p[0] - x, p[1] - y) };
+}
+function segIndexAt(R, ch) {
+  let lo = 0, hi = R.xy.length - 2;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (R.cum[mid] <= ch) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+// Nearest point on route between two chainages
+function projectRange(R, p, ch0 = 0, ch1 = Infinity) {
+  const i0 = segIndexAt(R, clamp(ch0, 0, R.length)), i1 = segIndexAt(R, clamp(ch1, 0, R.length));
+  let best = null;
+  for (let i = i0; i <= i1; i++) { const r = projSeg(R, p, i); if (!best || r.d < best.d) best = r; }
+  return best;
+}
+function xyAt(R, ch) {
+  ch = clamp(ch, 0, R.length);
+  const i = segIndexAt(R, ch), a = R.xy[i], b = R.xy[i + 1];
+  const L = R.cum[i + 1] - R.cum[i], t = L ? (ch - R.cum[i]) / L : 0;
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+// Heading in radians, 0 = north, clockwise
+function headingAt(R, ch, span = 10) {
+  const a = xyAt(R, ch - span), b = xyAt(R, ch + span);
+  return Math.atan2(b[0] - a[0], b[1] - a[1]);
+}
+
+// Bus timetable from LTA estimates: arrive at each stop at its ETA, dwell, depart.
+// anchors: [{ch, t}] from LTA; stopCh: all stop chainages on the route (sorted)
+function buildSchedule(ch0, t0, anchors, stopCh) {
+  const pts = [{ ch: ch0, t: t0 }];
+  for (const a of anchors.slice().sort((x, y) => x.ch - y.ch)) {
+    const last = pts[pts.length - 1];
+    if (a.ch <= last.ch + 5) continue;
+    const minT = last.t + (a.ch - last.ch) / 16 * 1000;      // cap at ~58 km/h
+    pts.push({ ch: a.ch, t: Math.max(a.t, minT) });
+  }
+  const nodes = [{ ch: ch0, arr: t0 }];
+  if (pts.length > 1) {
+    const end = pts[pts.length - 1].ch;
+    let j = 1;
+    for (const s of stopCh) {
+      if (s <= ch0 + 5 || s > end + 0.1) continue;
+      if (s - nodes[nodes.length - 1].ch < 1) continue;       // duplicate stop position
+      while (j < pts.length - 1 && pts[j].ch < s - 0.1) j++;
+      const A = pts[j - 1], B = pts[j];
+      const f = B.ch > A.ch ? clamp((s - A.ch) / (B.ch - A.ch), 0, 1) : 1;
+      nodes.push({ ch: s, arr: A.t + f * (B.t - A.t) });
+    }
+  }
+  for (let k = 0; k < nodes.length; k++) {
+    const n = nodes[k], nx = nodes[k + 1];
+    if (k === 0) n.dep = n.arr;
+    else if (!nx) n.dep = Infinity;                            // hold at last known stop
+    else n.dep = n.arr + Math.min(10000, 0.25 * (nx.arr - n.arr));
+  }
+  return nodes;
+}
+function chAt(nodes, t) {
+  if (!nodes || !nodes.length) return 0;
+  if (t <= nodes[0].arr) return nodes[0].ch;
+  for (let k = nodes.length - 1; k >= 0; k--) {
+    const n = nodes[k];
+    if (t >= n.arr) {
+      if (t <= n.dep) return n.ch;
+      const nx = nodes[k + 1];
+      if (!nx) return n.ch;
+      return n.ch + (nx.ch - n.ch) * Math.min(1, (t - n.dep) / Math.max(1, nx.arr - n.dep));
+    }
+  }
+  return nodes[0].ch;
+}
+// Smooth towards target; never creep backwards for small corrections
+function smoothCh(disp, target, k) {
+  if (target < disp && disp - target < 60) return disp;
+  return disp + (target - disp) * k;
+}
+
+function polyFeature(ringXY, base, top, color) {
+  const ring = ringXY.map(toLL); ring.push(ring[0]);
+  return { type: 'Feature', properties: { b: base, h: top, c: color }, geometry: { type: 'Polygon', coordinates: [ring] } };
+}
+// Block-style 3D bus made of stacked boxes, front of bus at chainage ch
+function busParts(R, ch, o) {
+  const L = o.bendy ? 18 : 12, W = 2.55, hl = L / 2, hw = W / 2;
+  const cch = ch - hl + 0.5;
+  const c = xyAt(R, cch), th = headingAt(R, cch, 8);
+  const f = [Math.sin(th), Math.cos(th)], r = [Math.cos(th), -Math.sin(th)];
+  const box = (a0, a1, b0, b1, base, top, color) => polyFeature(
+    [[a0, b0], [a1, b0], [a1, b1], [a0, b1]].map(([a, b]) => [c[0] + f[0] * a + r[0] * b, c[1] + f[1] * a + r[1] * b]),
+    base, top, color);
+  const body = o.color, roof = o.roof, glass = '#1d262d';
+  const out = [box(-hl, hl, -hw, hw, 0.35, 1.2, body)];
+  if (o.dd) {
+    out.push(box(-hl, hl, -hw, hw, 1.2, 2.3, glass), box(-hl, hl, -hw, hw, 2.3, 2.75, body),
+             box(-hl, hl, -hw, hw, 2.75, 3.95, glass), box(-hl, hl - 0.35, -hw, hw, 3.95, 4.35, roof));
+  } else {
+    out.push(box(-hl, hl, -hw, hw, 1.2, 2.6, glass), box(-hl, hl - 0.4, -hw, hw, 2.6, 3.05, roof));
+  }
+  out.push(box(hl - 0.1, hl + 0.08, -hw + 0.25, hw - 0.25, 0.5, 0.95, '#ffd54f'));   // headlight bar
+  for (const a of [-hl + 2.3, hl - 2.6]) {
+    out.push(box(a - 0.55, a + 0.55, hw - 0.05, hw + 0.12, 0, 0.75, '#111'));
+    out.push(box(a - 0.55, a + 0.55, -hw - 0.12, -hw + 0.05, 0, 0.75, '#111'));
+  }
+  return out;
+}
+
+function hash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function ngon(x, y, rad, rot, n = 8) {
+  const ring = [];
+  for (let i = 0; i < n; i++) { const a = rot + i * 2 * Math.PI / n; ring.push([x + rad * Math.cos(a), y + rad * Math.sin(a)]); }
+  return ring;
+}
+// Generated roadside trees along both sides of the route, gaps at stops and sharp bends
+function buildTrees(R) {
+  const feats = [], stops = R.stopCh;
+  const greens = [['#2e7d32', '#43a047'], ['#33691e', '#558b2f'], ['#1b5e20', '#388e3c'], ['#2e7d32', '#66bb6a']];
+  let si = 0, k = 0;
+  for (let ch = 8; ch < R.length - 8; ch += 12, k++) {
+    while (si < stops.length && stops[si] < ch - 25) si++;
+    if (si < stops.length && Math.abs(stops[si] - ch) < 25) continue;
+    let dh = Math.abs(headingAt(R, ch - 15, 5) - headingAt(R, ch + 15, 5));
+    if (dh > Math.PI) dh = 2 * Math.PI - dh;
+    if (dh > 0.5) continue;
+    const c = xyAt(R, ch), th = headingAt(R, ch, 6);
+    const f = [Math.sin(th), Math.cos(th)], r = [Math.cos(th), -Math.sin(th)];
+    for (const side of [-1, 1]) {
+      const n = k * 2 + (side > 0 ? 1 : 0);
+      if (hash(n + 7) < 0.12) continue;
+      const off = 9 + hash(n) * 2.5, along = (hash(n + 3) - 0.5) * 4, s = 0.8 + hash(n + 5) * 0.45;
+      const x = c[0] + r[0] * side * off + f[0] * along, y = c[1] + r[1] * side * off + f[1] * along;
+      const g = greens[Math.floor(hash(n + 9) * greens.length)], rot = hash(n + 11) * Math.PI;
+      feats.push(polyFeature(ngon(x, y, 0.3 * s, rot, 4), 0, 2.4 * s, '#6d4c41'));
+      feats.push(polyFeature(ngon(x, y, 2.4 * s, rot), 2.0 * s, 4.7 * s, g[0]));
+      feats.push(polyFeature(ngon(x, y, 1.6 * s, rot + 0.3), 4.7 * s, 6.4 * s, g[1]));
+    }
+  }
+  return feats;
+}
+// ==PURE-END==
+
+// ======================= helpers =======================
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+};
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : String(kid));
+  }
+  return el;
+}
+function toast(msg, ms = 2600) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+function naturalSort(a, b) {
+  const na = parseInt(a, 10), nb = parseInt(b, 10);
+  if (isNaN(na) && isNaN(nb)) return a.localeCompare(b);
+  if (isNaN(na)) return 1;
+  if (isNaN(nb)) return -1;
+  return na - nb || a.localeCompare(b);
+}
+function distM(a, b) { const p = toXY(a), q = toXY(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); }
+function fmtDist(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km'; }
+function minsUntil(t) { if (t == null || isNaN(t)) return null; return Math.round((t - Date.now()) / 60000); }
+function fmtMins(m) { return m === null ? '–' : (m <= 0 ? 'Arr' : m + ' min'); }
+function hhmm() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+const LOAD_TXT = { SEA: 'Seats available', SDA: 'Standing available', LSD: 'Limited standing' };
+const TYPE_TXT = { SD: 'Single deck', DD: 'Double deck', BD: 'Bendy' };
+const emptyFC = () => ({ type: 'FeatureCollection', features: [] });
+
+const params = new URLSearchParams(location.search);
+if (params.get('api')) store.set('busApi', params.get('api'));
+let API = (store.get('busApi') || DEFAULT_API || '').replace(/\/+$/, '');
+async function api(path) {
+  if (!API) throw new Error('No proxy set (⚙)');
+  const r = await fetch(API + path);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+async function loadData(name) {
+  let lastErr;
+  for (const base of DATA_BASES) {
+    try { const r = await fetch(base + name); if (r.ok) return await r.json(); lastErr = new Error(r.status + ' ' + name); }
+    catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+// ======================= state =======================
+const state = {
+  services: null, stops: null, routes: null, stopServices: {},
+  routeCache: {},
+  mode: 'browse',            // browse | setup | onboard | arrived | waiting
+  R: null,                   // route on screen
+  vehicles: [], vid: 0,
+  user: null,                // { ll, acc, t }
+  pollTimer: null, pollFn: null, pollToken: 0,
+  sheetTimer: null, sheetStop: null,
+  setup: null, trip: null, wait: null, arrived: null,
+  simPref: false,
+  markers: { next: null, alight: null, board: null },
+  stopSig: '', userMoved: false, wake: null
+};
+const stopName = code => (state.stops[code] ? state.stops[code][2] : code);
+const stopLL = code => { const s = state.stops[code]; return s ? [s[0], s[1]] : null; };
+
+function getRoute(no, dir) {
+  const key = no + '/' + dir;
+  if (state.routeCache[key]) return state.routeCache[key];
+  const s = state.services[no], codes = s.routes[dir];
+  const enc = state.routes[no] && state.routes[no][dir];
+  const line = enc ? decodePolyline(enc) : codes.map(stopLL).filter(Boolean);
+  const R = makeRoute(line, codes.map(stopLL));
+  R.no = no; R.dir = dir; R.codes = codes; R.key = key;
+  R.idxOf = {};
+  codes.forEach((c, i) => (R.idxOf[c] ||= []).push(i));
+  R.dest = stopName(codes[codes.length - 1]);
+  return (state.routeCache[key] = R);
+}
+function boardableDir(no, code) {
+  return state.services[no].routes.findIndex(r => { const i = r.indexOf(code); return i >= 0 && i < r.length - 1; });
+}
+
+// ======================= map =======================
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [103.8198, 1.3521], zoom: 11, pitch: 50, bearing: -15, maxPitch: 75,
+  attributionControl: { compact: true }
+});
+const mapReady = new Promise(res => map.on('load', res));
+
+function addLayers() {
+  if (!map.getLayer('building-3d') && map.getSource('openmaptiles')) {
+    map.addLayer({
+      id: 'building-3d', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 14,
+      paint: {
+        'fill-extrusion-color': '#d9d9d9',
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 10],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+        'fill-extrusion-opacity': 0.85
+      }
+    });
+  }
+  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop']) {
+    map.addSource(id, { type: 'geojson', data: emptyFC() });
+  }
+  map.addLayer({ id: 'all-stops', type: 'circle', source: 'all-stops', minzoom: 15,
+    paint: { 'circle-radius': 5, 'circle-color': '#fff', 'circle-stroke-color': '#0b7a75', 'circle-stroke-width': 2 } });
+  map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 6, 17, 16] } });
+  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#3d5afe', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 17, 10] } });
+  map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 14,
+    paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
+  map.addLayer({ id: 'buses', type: 'fill-extrusion', source: 'buses',
+    paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
+  map.addLayer({ id: 'bus-ring', type: 'circle', source: 'bus-pts', filter: ['==', ['get', 'mine'], true],
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(255,196,0,0.18)',
+             'circle-stroke-color': '#ffc400', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+  map.addLayer({ id: 'bus-dot', type: 'circle', source: 'bus-pts', maxzoom: 14.5,
+    paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+  map.addLayer({ id: 'route-stops', type: 'circle', source: 'route-stops',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, ['match', ['get', 'status'], 'next', 10, 'alight', 11, 'board', 11, 8], 17, 13],
+      'circle-color': ['match', ['get', 'status'], 'passed', COLORS.stopPassed, COLORS.stop],
+      'circle-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1],
+      'circle-stroke-color': ['match', ['get', 'status'], 'alight', '#ffc400', 'board', '#00e676', 'next', '#82b1ff', '#ffffff'],
+      'circle-stroke-width': ['match', ['get', 'status'], 'alight', 4, 'board', 4, 'next', 3, 2],
+      'circle-stroke-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1]
+    } });
+  map.addLayer({ id: 'route-stops-label', type: 'symbol', source: 'route-stops', minzoom: 13.5,
+    layout: { 'text-field': ['to-string', ['get', 'seq']], 'text-font': ['Noto Sans Bold'], 'text-size': 11,
+              'text-allow-overlap': true, 'text-ignore-placement': true },
+    paint: { 'text-color': '#ffffff' } });
+  map.addLayer({ id: 'route-stops-name', type: 'symbol', source: 'route-stops', minzoom: 15,
+    filter: ['!=', ['get', 'status'], 'passed'],
+    layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.6],
+              'text-anchor': 'top', 'text-optional': true },
+    paint: { 'text-color': COLORS.stop, 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
+  map.addLayer({ id: 'bus-label', type: 'symbol', source: 'bus-pts', minzoom: 14.5,
+    layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-offset': [0, -3.2],
+              'text-allow-overlap': true },
+    paint: { 'text-color': '#fff', 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 } });
+  map.addLayer({ id: 'me', type: 'circle', source: 'me',
+    paint: { 'circle-radius': 7, 'circle-color': '#1a73e8', 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
+  map.addLayer({ id: 'sel-stop', type: 'circle', source: 'sel-stop',
+    paint: { 'circle-radius': 18, 'circle-color': 'rgba(0,229,255,0.15)', 'circle-stroke-color': '#00b8d4', 'circle-stroke-width': 4 } });
+
+  map.on('click', onMapClick);
+  for (const id of ['route-stops', 'all-stops']) {
+    map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
+  }
+  map.on('dragstart', () => {
+    if (state.mode === 'onboard' && state.trip && state.trip.follow) { state.trip.follow = false; $('followBtn').hidden = false; }
+    state.userMoved = true;
+  });
+}
+
+function setLayerVisible(id, on) { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); }
+
+// ======================= init =======================
+(async function init() {
+  try {
+    const [services, stops, routes] = await Promise.all([
+      loadData('services.min.json'), loadData('stops.min.json'), loadData('routes.min.json'), mapReady
+    ]);
+    Object.assign(state, { services, stops, routes });
+    for (const [no, s] of Object.entries(services)) {
+      for (const dirCodes of s.routes) for (const code of dirCodes) (state.stopServices[code] ||= new Set()).add(no);
+    }
+    for (const k in state.stopServices) state.stopServices[k] = [...state.stopServices[k]].sort(naturalSort);
+    const dl = $('svcList');
+    for (const no of Object.keys(services).sort(naturalSort)) dl.appendChild(h('option', { value: no, label: services[no].name }));
+
+    addLayers();
+    map.getSource('all-stops').setData({
+      type: 'FeatureCollection',
+      features: Object.entries(stops).map(([code, s]) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s[0], s[1]] }, properties: { code } }))
+    });
+    $('loading').remove();
+    startLocation();
+    requestAnimationFrame(frame);
+    const pre = params.get('service');
+    if (pre) showService(pre.toUpperCase(), 0);
+  } catch (e) {
+    $('loading').textContent = 'Could not load bus data: ' + e.message;
+  }
+})();
+
+// ======================= location =======================
+let firstFix = true;
+function startLocation() {
+  if (!('geolocation' in navigator)) { toast('Location not supported on this device'); return; }
+  navigator.geolocation.watchPosition(pos => {
+    const ll = [pos.coords.longitude, pos.coords.latitude], t = Date.now();
+    state.user = { ll, acc: pos.coords.accuracy, t };
+    map.getSource('me') && map.getSource('me').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: ll }, properties: {} });
+    if (firstFix && state.mode === 'browse' && !state.R) { map.easeTo({ center: ll, zoom: 15.5, duration: 1200 }); }
+    firstFix = false;
+    if (state.mode === 'setup') setupOnFix(ll, t);
+    else if (state.mode === 'onboard') tripOnFix(ll, pos.coords.accuracy, t, false);
+    else if (state.mode === 'waiting') waitOnFix(ll, pos.coords.accuracy, t);
+  }, err => {
+    toast(err.code === 1 ? 'Location permission denied – allow it in browser settings' : 'Location unavailable');
+  }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+}
+$('locateBtn').onclick = () => {
+  if (!state.user) return toast('Waiting for your location…');
+  if (state.mode === 'onboard' && state.trip) { followOn(); return; }
+  map.easeTo({ center: state.user.ll, zoom: Math.max(map.getZoom(), 16), duration: 800 });
+};
+
+// ======================= panel / UI helpers =======================
+function setPanel(...nodes) {
+  const p = $('panel'); p.innerHTML = '';
+  p.append(h('div', { class: 'grab' }), ...nodes.flat(Infinity).filter(n => n != null && n !== false));
+  p.hidden = false; p.scrollTop = 0;
+  requestAnimationFrame(placeFabs);
+}
+function hidePanel() { $('panel').hidden = true; $('panel').innerHTML = ''; placeFabs(); }
+function placeFabs() {
+  const p = $('panel');
+  $('fabs').style.bottom = (p.hidden ? 24 : p.offsetHeight + 12) + 'px';
+}
+window.addEventListener('resize', placeFabs);
+if ('ResizeObserver' in window) new ResizeObserver(placeFabs).observe($('panel'));
+function panelHead(title, onClose, badge) {
+  return h('div', { class: 'phead' },
+    badge ? h('span', { class: 'svcbadge red' }, badge) : null,
+    h('h2', null, title),
+    onClose ? h('button', { class: 'xbtn', 'aria-label': 'Close', onclick: onClose }, '✕') : null);
+}
+function setTopMode(text) {
+  const browse = state.mode === 'browse';
+  $('searchForm').hidden = !browse;
+  $('onBusBtn').hidden = !browse;
+  $('modeChip').hidden = browse;
+  $('modeChip').textContent = text || '';
+  if (!browse) $('routeBar').hidden = true;
+  setLayerVisible('all-stops', browse);
+}
+function showAlert(title, text, red) {
+  $('alertTitle').textContent = title; $('alertText').textContent = text;
+  $('alertBox').className = red ? 'red' : ''; $('alertBox').hidden = false;
+  clearTimeout(showAlert._t); showAlert._t = setTimeout(() => $('alertBox').hidden = true, 20000);
+}
+$('alertOk').onclick = () => $('alertBox').hidden = true;
+
+let actx = null;
+function unlockAudio() { try { actx ||= new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {} }
+function beep(n = 2) {
+  if (!actx) return;
+  for (let i = 0; i < n; i++) {
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.4;
+    o.frequency.value = i % 2 ? 660 : 880; o.type = 'sine';
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.32);
+  }
+}
+function buzz(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !state.wake) { state.wake = await navigator.wakeLock.request('screen'); state.wake.addEventListener('release', () => state.wake = null); }
+    if (!on && state.wake) { await state.wake.release(); state.wake = null; }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (state.mode === 'onboard' || state.mode === 'waiting') keepAwake(true);
+  if (state.pollFn) state.pollFn();
+});
+
+// ======================= route rendering =======================
+function renderRoute(R, opts = {}) {
+  if (state.R !== R) { state.vehicles = []; }
+  state.R = R;
+  map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: R.ll }, properties: {} });
+  if (!R.trees) R.trees = { type: 'FeatureCollection', features: buildTrees(R) };
+  map.getSource('trees').setData(R.trees);
+  state.stopSig = '';
+  updateStops(true);
+  if (opts.fit) {
+    const b = new maplibregl.LngLatBounds(); R.ll.forEach(c => b.extend(c));
+    map.fitBounds(b, { padding: { top: 170, bottom: 120, left: 40, right: 70 }, maxZoom: 15.5, duration: 900 });
+  }
+}
+function clearRoute() {
+  state.R = null; state.vehicles = []; state.stopSig = '';
+  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop']) map.getSource(id) && map.getSource(id).setData(emptyFC());
+  for (const k of Object.keys(state.markers)) { if (state.markers[k]) state.markers[k].remove(); state.markers[k] = null; }
+}
+// stop status: passed / next / alight / board / normal
+function stopStatuses() {
+  const R = state.R; if (!R) return [];
+  const st = R.codes.map(() => 'normal');
+  if (state.mode === 'onboard' && state.trip) {
+    const T = state.trip;
+    R.stopCh.forEach((c, i) => { if (c < T.disp - 20) st[i] = 'passed'; });
+    const nx = nextStopIdx(R, T.disp); if (nx >= 0) st[nx] = 'next';
+    if (T.alightIdx != null) st[T.alightIdx] = 'alight';
+  } else if (state.mode === 'waiting' && state.wait) {
+    const W = state.wait;
+    for (let i = 0; i < W.idx; i++) st[i] = 'passed';
+    st[W.idx] = 'board';
+    if (W.alightIdx != null) st[W.alightIdx] = 'alight';
+  }
+  return st;
+}
+function nextStopIdx(R, ch) { return R.stopCh.findIndex(c => c > ch - 20); }
+// stops still ahead of the bus up to and including your stop (the stop you're standing at doesn't count)
+function stopsLeft(T) { if (T.alightIdx == null) return null; const a = T.R.stopCh.findIndex(c => c > T.disp + 20); return a < 0 ? 0 : Math.max(0, T.alightIdx - a + 1); }
+function updateStops(force) {
+  const R = state.R; if (!R) return;
+  const st = stopStatuses(), sig = st.join(',');
+  if (!force && sig === state.stopSig) return;
+  state.stopSig = sig;
+  map.getSource('route-stops').setData({
+    type: 'FeatureCollection',
+    features: R.codes.map((code, i) => {
+      const s = state.stops[code]; if (!s) return null;
+      return { type: 'Feature', geometry: { type: 'Point', coordinates: [s[0], s[1]] }, properties: { code, seq: i + 1, idx: i, status: st[i], name: s[2] } };
+    }).filter(Boolean)
+  });
+  const place = (key, idx, make) => {
+    if (idx < 0 || idx == null) { if (state.markers[key]) { state.markers[key].remove(); state.markers[key] = null; } return; }
+    const ll = stopLL(R.codes[idx]); if (!ll) return;
+    if (!state.markers[key]) state.markers[key] = make().setLngLat(ll).addTo(map); else state.markers[key].setLngLat(ll);
+  };
+  place('next', st.indexOf('next'), () => new maplibregl.Marker({ element: h('div', { class: 'pulse' }), pitchAlignment: 'map', rotationAlignment: 'map' }));
+  place('alight', st.indexOf('alight'), () => new maplibregl.Marker({ element: h('div', { class: 'flag' }, '🏁 Alight'), anchor: 'bottom', offset: [0, -14] }));
+  place('board', st.indexOf('board'), () => new maplibregl.Marker({ element: h('div', { class: 'flag board' }, '● Board here'), anchor: 'bottom', offset: [0, -14] }));
+}
+
+// ======================= map taps =======================
+function onMapClick(e) {
+  const p = e.point, pad = 14;
+  const layers = state.mode === 'browse' ? ['route-stops', 'all-stops'] : ['route-stops'];
+  const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
+  if (!feats.length) return;
+  const f = feats[0].properties;
+  if (state.mode === 'browse') return openStop(f.code);
+  if (state.mode === 'onboard' && state.trip) {
+    const T = state.trip;
+    if (f.idx != null && T.R.stopCh[f.idx] > T.disp + 20) { setAlight(f.idx); toast('Alight stop: ' + stopName(f.code)); }
+    else toast(stopName(f.code));
+  } else if (state.mode === 'waiting' && state.wait) {
+    if (f.idx > state.wait.idx) { state.wait.alightIdx = f.idx; updateStops(true); renderWaitPanel(); toast('Alight stop: ' + stopName(f.code)); }
+    else toast(stopName(f.code));
+  }
+}
+
+// ======================= polling =======================
+function setPoll(fn, ms = POLL_MS) {
+  clearInterval(state.pollTimer); state.pollTimer = null; state.pollFn = fn; state.pollToken++;
+  if (!fn) return;
+  fn();
+  state.pollTimer = setInterval(() => { if (!document.hidden && state.pollFn) state.pollFn(); }, ms);
+}
+async function fetchServiceData(R, idxs) {
+  const codes = [...new Set(idxs.filter(i => i >= 0 && i < R.codes.length).map(i => R.codes[i]))].slice(0, 25);
+  return api(`/service-arrivals?service=${encodeURIComponent(R.no)}&stops=${codes.join(',')}`);
+}
+// Group LTA observations into vehicles (same GPS = same bus) and build their timetables
+function vehiclesFrom(R, data, now) {
+  const last = R.codes[R.codes.length - 1], twoDir = state.services[R.no].routes.length > 1;
+  const groups = new Map();
+  for (const [code, list] of Object.entries(data.stops || {})) for (const o of list || []) {
+    if (!o.lat || !o.lng) continue;
+    if (twoDir && o.dest && o.dest !== last) continue;
+    const key = o.lat.toFixed(5) + ',' + o.lng.toFixed(5);
+    let g = groups.get(key);
+    if (!g) groups.set(key, g = { key, ll: [o.lng, o.lat], type: o.type, load: o.load, obs: [] });
+    g.obs.push({ code, t: Date.parse(o.eta) });
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    const r = projectRange(R, toXY(g.ll));
+    if (!r || r.d > 150) continue;
+    const anchors = [], etaByCode = {};
+    for (const o of g.obs) {
+      etaByCode[o.code] = o.t;
+      const chs = (R.idxOf[o.code] || []).map(i => R.stopCh[i]).filter(c => c > r.ch - 20).sort((a, b) => a - b);
+      if (chs.length && !isNaN(o.t)) anchors.push({ ch: Math.max(chs[0], r.ch), t: o.t });
+    }
+    out.push({ key: g.key, ch0: r.ch, nodes: buildSchedule(r.ch, now, anchors, R.stopCh), type: g.type, load: g.load, etaByCode, role: 'main' });
+  }
+  return out;
+}
+function mergeVehicles(fresh) {
+  const old = state.vehicles, used = new Set();
+  fresh.sort((a, b) => a.ch0 - b.ch0);
+  for (const v of fresh) {
+    let best = null, bd = 300;
+    for (const o of old) { if (used.has(o)) continue; const d = Math.abs(o.disp - v.ch0); if (d < bd) { bd = d; best = o; } }
+    if (best) { used.add(best); v.id = best.id; v.disp = best.disp; } else { v.id = ++state.vid; v.disp = v.ch0; }
+  }
+  state.vehicles = fresh;
+}
+
+// ======================= animation loop =======================
+let lastFrame = 0;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (document.hidden || ts - lastFrame < 50) return;     // ~20 fps
+  const dt = Math.min(0.5, (ts - lastFrame) / 1000); lastFrame = ts;
+  const R = state.R; if (!R || !map.getSource('buses')) return;
+  const now = Date.now(), k = 1 - Math.exp(-dt / 0.8);
+  const feats = [], pts = [];
+  for (const v of state.vehicles) {
+    v.disp = clamp(smoothCh(v.disp, chAt(v.nodes, now), k), 0, R.length);
+    if (v.role === 'hidden' || state.mode === 'onboard') continue;
+    const second = v.role === 'second';
+    feats.push(...busParts(R, v.disp, { color: second ? COLORS.bus2 : COLORS.bus, roof: second ? COLORS.bus2Roof : COLORS.busRoof, dd: v.type === 'DD', bendy: v.type === 'BD' }));
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: second ? COLORS.bus2 : COLORS.bus } });
+  }
+  if (state.mode === 'onboard' && state.trip) {
+    const T = state.trip;
+    updateOwnBus(now, k);
+    const mv = state.vehicles.find(v => v.id === T.myVid);
+    feats.push(...busParts(R, T.disp, { color: COLORS.bus, roof: COLORS.busRoof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.bus, mine: true } });
+    if (T.follow) followCam(now);
+    tripProgress();
+    if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
+  }
+  map.getSource('buses').setData({ type: 'FeatureCollection', features: feats });
+  map.getSource('bus-pts').setData({ type: 'FeatureCollection', features: pts });
+}
+
+// ======================= BROWSE =======================
+function enterMode(m, chip) {
+  if (state.mode === 'onboard' && m !== 'onboard') stopTrip();
+  state.mode = m;
+  clearInterval(state.sheetTimer); state.sheetStop = null;
+  map.getSource('sel-stop') && map.getSource('sel-stop').setData(emptyFC());
+  setTopMode(chip);
+  setLayerVisible('me', m !== 'onboard');
+  keepAwake(m === 'onboard' || m === 'waiting');
+  if (m !== 'onboard') { $('followBtn').hidden = true; map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); }
+}
+
+function showService(no, dir = 0) {
+  const s = state.services[no];
+  if (!s) { toast('No bus service "' + no + '"'); return; }
+  if (state.mode !== 'browse') enterMode('browse');
+  const R = getRoute(no, Math.min(dir, s.routes.length - 1));
+  renderRoute(R, { fit: true });
+  $('routeNo').textContent = no;
+  $('routeDir').innerHTML = '';
+  $('routeDir').append(h('div', null, stopName(R.codes[0]) + ' → ' + R.dest),
+    h('small', null, R.codes.length + ' stops · ' + (R.length / 1000).toFixed(1) + ' km' + (s.routes.length > 1 ? ' · direction ' + (R.dir + 1) + ' of 2' : ' · loop')));
+  $('dirBtn').hidden = s.routes.length < 2;
+  $('routeBar').hidden = false;
+  $('q').value = no; $('q').blur();
+  history.replaceState(null, '', '?service=' + encodeURIComponent(no));
+  setPoll(pollBrowse);
+}
+async function pollBrowse() {
+  const R = state.R, token = state.pollToken; if (!R) return;
+  const n = R.codes.length, step = Math.max(1, Math.ceil((n - 1) / 20)), idxs = [];
+  for (let i = step; i < n; i += step) idxs.push(i);
+  idxs.push(n - 1);
+  $('liveStatus').textContent = '⏳ Updating live buses…';
+  try {
+    const data = await fetchServiceData(R, idxs);
+    if (token !== state.pollToken || state.R !== R) return;
+    mergeVehicles(vehiclesFrom(R, data, Date.now()));
+    const c = state.vehicles.length;
+    $('liveStatus').textContent = c ? `🟢 ${c} bus${c > 1 ? 'es' : ''} live · ${hhmm()}` : `No live buses this direction · ${hhmm()}`;
+  } catch (e) {
+    if (token === state.pollToken) $('liveStatus').textContent = '⚠ ' + e.message;
+  }
+}
+function clearService() {
+  setPoll(null); clearRoute();
+  $('routeBar').hidden = true; $('q').value = ''; hidePanel();
+  history.replaceState(null, '', location.pathname);
+}
+$('searchForm').addEventListener('submit', e => { e.preventDefault(); const v = $('q').value.trim().toUpperCase(); if (v) showService(v, 0); });
+$('dirBtn').onclick = () => state.R && showService(state.R.no, state.R.dir === 0 ? 1 : 0);
+$('clearBtn').onclick = clearService;
+
+// Stop sheet (browse)
+function openStop(code) {
+  const st = state.stops[code]; if (!st) return;
+  state.sheetStop = code;
+  map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [st[0], st[1]] }, properties: {} });
+  const chips = (state.stopServices[code] || []).map(no => h('button', {
+    class: 'chip' + (state.R && no === state.R.no ? ' current' : ''), title: state.services[no].name,
+    onclick: () => { const d = state.services[no].routes.findIndex(r => r.includes(code)); showService(no, Math.max(0, d)); openStop(code); }
+  }, no));
+  const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading…'));
+  setPanel(
+    panelHead(st[2], closeStop),
+    h('div', { class: 'sub' }, code + ' · ' + st[3] + (state.user ? ' · ' + fmtDist(distM(state.user.ll, [st[0], st[1]])) + ' away' : '')),
+    h('h3', null, 'Services at this stop'), h('div', { class: 'chips' }, chips),
+    h('h3', null, 'Live arrivals · tap ⏱ to track the next bus'), arrivals,
+    legend());
+  map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
+  clearInterval(state.sheetTimer);
+  loadArrivals(code);
+  state.sheetTimer = setInterval(() => { if (!document.hidden && state.sheetStop === code) loadArrivals(code); }, POLL_MS);
+}
+function closeStop() { clearInterval(state.sheetTimer); state.sheetStop = null; map.getSource('sel-stop').setData(emptyFC()); hidePanel(); }
+function legend() {
+  return h('div', { class: 'legend' }, h('span', { style: '--c:var(--green)' }, 'Seats'), h('span', { style: '--c:var(--amber)' }, 'Standing'), h('span', { style: '--c:var(--lsd)' }, 'Limited standing'));
+}
+function timePills(buses) {
+  const pills = (buses || []).slice(0, 3).map(b => h('span', { class: 't ' + (b.load || 'NA'), title: LOAD_TXT[b.load] || '' }, fmtMins(minsUntil(Date.parse(b.eta)))));
+  return pills.length ? pills : [h('span', { class: 'meta' }, 'Not in operation')];
+}
+async function loadArrivals(code) {
+  const box = $('arrivals'); if (!box) return;
+  try {
+    const data = await api('/multi-arrival?stops=' + code);
+    if (state.sheetStop !== code || !$('arrivals')) return;
+    const list = ((data.stops || {})[code] || []).slice().sort((a, b) => naturalSort(a.ServiceNo, b.ServiceNo));
+    box.innerHTML = '';
+    if (!list.length) box.append(h('div', { class: 'note' }, 'No buses arriving right now.'));
+    for (const sv of list) {
+      const b0 = sv.buses[0] || {};
+      const canTrack = state.services[sv.ServiceNo] && boardableDir(sv.ServiceNo, code) >= 0;
+      box.append(h('div', { class: 'arr' },
+        h('button', { class: 'chip', onclick: () => { const d = state.services[sv.ServiceNo] ? state.services[sv.ServiceNo].routes.findIndex(r => r.includes(code)) : -1; if (d < 0) return toast('No route data'); showService(sv.ServiceNo, d); openStop(code); } }, sv.ServiceNo),
+        h('div', { class: 'info' }, h('div', { class: 'dest' }, '→ ' + (b0.dest ? stopName(b0.dest) : '')), h('div', { class: 'times' }, timePills(sv.buses))),
+        h('span', { class: 'meta' }, [TYPE_TXT[b0.type] ? b0.type : '', b0.feature === 'WAB' ? '♿' : ''].filter(Boolean).join(' ')),
+        canTrack ? h('button', { class: 'pill primary', title: 'Track next bus', onclick: () => startWaiting(sv.ServiceNo, code, null) }, '⏱') : null));
+    }
+  } catch (e) {
+    if (state.sheetStop === code && $('arrivals')) box.innerHTML = '', box.append(h('div', { class: 'note' }, '⚠ ' + e.message));
+  }
+}
+
+// ======================= TRIP SETUP =======================
+$('onBusBtn').onclick = openOnBus;
+function openOnBus() {
+  unlockAudio();
+  const input = h('input', { class: 'field', list: 'svcList', placeholder: 'Bus number, e.g. 105', autocapitalize: 'characters' });
+  const sim = h('input', { type: 'checkbox' }); sim.checked = state.simPref;
+  const go = () => {
+    const no = input.value.trim().toUpperCase();
+    if (!state.services[no]) return toast('No bus service "' + no + '"');
+    state.simPref = sim.checked; startSetup(no, sim.checked);
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  setPanel(panelHead("I'm on a bus", hidePanel),
+    h('div', { class: 'sub' }, 'Enter the service number of the bus you are on.'),
+    input,
+    h('label', { class: 'check' }, sim, 'Simulate the ride (testing at home)'),
+    h('div', { class: 'row' }, h('button', { class: 'pill primary', onclick: go }, 'Start ▶')));
+  setTimeout(() => input.focus(), 150);
+}
+function startSetup(no, sim) {
+  unlockAudio();
+  const s = state.services[no];
+  const Rs = s.routes.map((_, d) => getRoute(no, d));
+  setPoll(null);
+  enterMode('setup', '🚌 ' + no + ' · choosing direction');
+  state.setup = { no, Rs, sim, fixes: [] };
+  if (Rs.length === 1) return chooseDirection(0);
+  renderRoute(Rs[0], { fit: true });
+  const status = h('div', { class: 'status', id: 'detectStatus' }, sim ? 'Pick the direction to simulate.' : 'Detecting your direction from GPS… or pick below.');
+  setPanel(panelHead('Which direction?', resetAll, no),
+    ...Rs.map((R, d) => h('button', { class: 'dirbtn', onclick: () => chooseDirection(d) },
+      h('b', null, '→ ' + R.dest), h('div', { class: 'sub', style: 'margin:2px 0 0' }, 'from ' + stopName(R.codes[0]) + ' · ' + R.codes.length + ' stops'))),
+    status);
+  if (!sim && state.user) setupOnFix(state.user.ll, state.user.t);
+}
+function setupOnFix(ll, t) {
+  const S = state.setup; if (!S || S.sim || S.Rs.length < 2) return;
+  S.fixes.push({ p: toXY(ll), t }); S.fixes = S.fixes.filter(f => t - f.t < 40000);
+  const lastF = S.fixes[S.fixes.length - 1];
+  const pr = S.Rs.map(R => projectRange(R, lastF.p));
+  const status = $('detectStatus');
+  const say = txt => { if (status) status.textContent = txt; };
+  const minD = Math.min(pr[0].d, pr[1].d);
+  if (minD > 120) return say(`You're ${fmtDist(minD)} from route ${S.no}. Pick your direction below.`);
+  if (pr[0].d < 70 && pr[1].d > 150) return chooseDirection(0);
+  if (pr[1].d < 70 && pr[0].d > 150) return chooseDirection(1);
+  const first = S.fixes[0];
+  if (Math.hypot(lastF.p[0] - first.p[0], lastF.p[1] - first.p[1]) >= 30) {
+    const delta = S.Rs.map(R => projectRange(R, lastF.p).ch - projectRange(R, first.p).ch);
+    const ok = [0, 1].filter(d => delta[d] > 15 && pr[d].d < 80);
+    if (ok.length) return chooseDirection(ok.length === 1 ? ok[0] : (delta[0] > delta[1] ? 0 : 1));
+  }
+  say('Detecting direction… it will be picked once the bus moves, or tap one above.');
+}
+function chooseDirection(dir) {
+  const S = state.setup; if (!S) return;
+  state.setup = null;
+  startTrip(S.no, dir, { sim: S.sim });
+}
+
+// ======================= ON BOARD =======================
+function startTrip(no, dir, o = {}) {
+  unlockAudio();
+  const R = getRoute(no, dir);
+  let ch0 = o.boardIdx != null ? R.stopCh[o.boardIdx] : 0, fixT = 0;
+  if (!o.sim && state.user && Date.now() - state.user.t < 30000) {
+    const lo = o.boardIdx != null ? R.stopCh[o.boardIdx] - 200 : 0;
+    const r = projectRange(R, toXY(state.user.ll), lo, Infinity);
+    if (r && r.d < 150) { ch0 = r.ch; fixT = state.user.t; }
+  }
+  setPoll(null);
+  enterMode('onboard', '🚌 ' + no + ' → ' + R.dest);
+  state.trip = { no, dir, R, sim: !!o.sim, alightIdx: null, fixCh: ch0, fixT, speed: 0, disp: ch0, alerts: {},
+                 follow: true, offCount: 0, myVid: null, ltaEta: null, camBearing: null, simState: null, simTimer: null };
+  renderRoute(R);
+  map.setPadding({ top: Math.round(innerHeight * 0.3), bottom: 0, left: 0, right: 0 });
+  map.jumpTo({ center: toLL(xyAt(R, ch0)), zoom: 17.2, pitch: 62, bearing: headingAt(R, ch0, 20) * 180 / Math.PI });
+  if (o.sim) startSim();
+  setPoll(pollOnboard);
+  if (o.alightIdx != null && R.stopCh[o.alightIdx] > ch0 + 20) { setAlight(o.alightIdx); }
+  else openAlightPicker();
+}
+function stopTrip() {
+  const T = state.trip; if (!T) return;
+  clearInterval(T.simTimer);
+  state.trip = null;
+  $('followBtn').hidden = true;
+}
+function followOn() { if (!state.trip) return; state.trip.follow = true; $('followBtn').hidden = true; }
+$('followBtn').onclick = followOn;
+
+function tripOnFix(ll, acc, t, isSim) {
+  const T = state.trip; if (!T || T.sim !== isSim) return;
+  if (acc > 60) return;
+  const p = toXY(ll);
+  const r = T.fixT ? projectRange(T.R, p, T.fixCh - 150, T.fixCh + 1500) : projectRange(T.R, p);
+  if (!r || r.d > 80) {
+    if (++T.offCount === 6) toast('You seem to be off the ' + T.no + ' route – check the bus number or direction', 5000);
+    return;
+  }
+  T.offCount = 0;
+  if (T.fixT) {
+    const dt = (t - T.fixT) / 1000;
+    if (dt > 0.3) T.speed = clamp(T.speed * 0.6 + Math.max(0, (r.ch - T.fixCh) / dt) * 0.4, 0, 25);
+    if (r.ch < T.fixCh - 25) return;     // ignore jumps backwards (GPS jitter)
+  }
+  T.fixCh = r.ch; T.fixT = t;
+}
+function updateOwnBus(now, k) {
+  const T = state.trip, R = T.R;
+  let target;
+  T.gpsFresh = T.fixT && now - T.fixT < 15000;
+  if (T.gpsFresh) target = Math.min(T.fixCh + T.speed * Math.min(4, (now - T.fixT) / 1000), T.fixCh + 50);
+  else { const v = state.vehicles.find(v => v.id === T.myVid); target = v ? chAt(v.nodes, now) : T.disp; }
+  T.disp = clamp(smoothCh(T.disp, target, k), 0, R.length);
+}
+function followCam() {
+  const T = state.trip, R = T.R;
+  const hd = headingAt(R, T.disp, 25) * 180 / Math.PI;
+  if (T.camBearing == null) T.camBearing = hd;
+  let d = ((hd - T.camBearing + 540) % 360) - 180;
+  T.camBearing += d * 0.08;
+  map.jumpTo({ center: toLL(xyAt(R, T.disp - 4)), bearing: T.camBearing });
+}
+async function pollOnboard() {
+  const T = state.trip; if (!T) return;
+  const R = T.R, token = state.pollToken;
+  const nx = Math.max(0, nextStopIdx(R, T.disp)), idxs = [];
+  for (let i = nx; i < Math.min(R.codes.length, nx + 8); i++) idxs.push(i);
+  if (T.alightIdx != null) idxs.push(T.alightIdx);
+  try {
+    const data = await fetchServiceData(R, idxs);
+    if (token !== state.pollToken || state.trip !== T) return;
+    mergeVehicles(vehiclesFrom(R, data, Date.now()).map(v => (v.role = 'hidden', v)));
+    let best = null, bd = 250;
+    for (const v of state.vehicles) { const d = Math.abs(v.disp - T.disp); if (d < bd) { bd = d; best = v; } }
+    T.myVid = best ? best.id : null;
+    T.ltaEta = best && T.alightIdx != null ? best.etaByCode[R.codes[T.alightIdx]] || null : null;
+  } catch (e) { /* GPS still works without live data */ }
+}
+
+// Alight picker
+function openAlightPicker(forWaiting) {
+  const ctx = forWaiting ? state.wait : state.trip; if (!ctx) return;
+  const R = ctx.R;
+  let from = forWaiting ? ctx.idx + 1 : R.stopCh.findIndex(c => c > ctx.disp + 20);
+  if (from < 0) from = R.codes.length;
+  const startCh = forWaiting ? R.stopCh[ctx.idx] : ctx.disp;
+  const list = h('div', { class: 'stoplist' });
+  const search = h('input', { class: 'field', placeholder: 'Search stop name or code' });
+  const render = () => {
+    const q = search.value.trim().toLowerCase(); list.innerHTML = '';
+    for (let i = from; i < R.codes.length; i++) {
+      const code = R.codes[i], nm = stopName(code);
+      if (q && !nm.toLowerCase().includes(q) && !code.includes(q)) continue;
+      list.append(h('div', { class: 'stopitem', onclick: () => {
+          if (forWaiting) { ctx.alightIdx = i; updateStops(true); renderWaitPanel(); } else setAlight(i);
+        } },
+        h('span', { class: 'seq' }, i + 1),
+        h('div', { class: 'nm' }, nm, h('small', null, code + ' · ' + (state.stops[code] ? state.stops[code][3] : ''))),
+        h('span', { class: 'meta' }, fmtDist(Math.max(0, R.stopCh[i] - startCh)))));
+    }
+    if (!list.children.length) list.append(h('div', { class: 'note' }, 'No matching stops ahead.'));
+  };
+  search.addEventListener('input', render);
+  setPanel(panelHead('Where are you alighting?', forWaiting ? renderWaitPanel : renderTripPanel, R.no),
+    h('div', { class: 'sub' }, 'Tap a stop below or on the map. You will be alerted ' + ALERT_STOPS + ' stops before.'),
+    search, list);
+  render();
+}
+function setAlight(i) {
+  const T = state.trip; if (!T) return;
+  T.alightIdx = i; T.alerts = {}; T.ltaEta = null;
+  updateStops(true);
+  renderTripPanel();
+  if (state.pollFn) state.pollFn();
+}
+let tripUI = null;
+function renderTripPanel() {
+  const T = state.trip; if (!T) return;
+  tripUI = { next: h('div', { class: 'big' }), alight: h('div', { class: 'sub' }), stops: h('b'), dist: h('b'), eta: h('b'), src: h('div', { class: 'status' }) };
+  const simBtn = T.sim ? h('button', { class: 'pill', onclick: e => { const s = T.simState; s.mult = s.mult === 1 ? 4 : s.mult === 4 ? 10 : 1; e.target.textContent = 'Sim ' + s.mult + '×'; } }, 'Sim ' + (T.simState ? T.simState.mult : 4) + '×') : null;
+  setPanel(
+    panelHead('On bus ' + T.no + ' → ' + T.R.dest, null, T.no),
+    h('div', { class: 'sub' }, 'Next stop'), tripUI.next,
+    T.alightIdx != null
+      ? [tripUI.alight, h('div', { class: 'kpis' },
+          h('div', { class: 'kpi' }, tripUI.stops, h('span', null, 'stops left')),
+          h('div', { class: 'kpi' }, tripUI.dist, h('span', null, 'distance')),
+          h('div', { class: 'kpi' }, tripUI.eta, h('span', null, 'to your stop')))]
+      : h('div', { class: 'note' }, 'Choose your alighting stop to get alerts.'),
+    h('div', { class: 'row' },
+      h('button', { class: 'pill primary', onclick: () => openAlightPicker(false) }, T.alightIdx != null ? 'Change stop' : 'Choose alighting stop'),
+      simBtn,
+      h('button', { class: 'pill', onclick: () => confirmRestart() }, 'End trip')),
+    tripUI.src);
+  updateTripPanel(true);
+}
+let lastPanelUpdate = 0;
+function updateTripPanel(force) {
+  const T = state.trip; if (!T || !tripUI || !document.body.contains(tripUI.next)) return;
+  const now = Date.now(); if (!force && now - lastPanelUpdate < 1000) return; lastPanelUpdate = now;
+  const R = T.R, nx = nextStopIdx(R, T.disp);
+  const atIdx = R.stopCh.findIndex(c => Math.abs(c - T.disp) <= 20);
+  tripUI.next.textContent = atIdx >= 0 ? 'At ' + stopName(R.codes[atIdx]) : (nx >= 0 ? stopName(R.codes[nx]) : 'End of route');
+  if (T.alightIdx != null) {
+    const left = stopsLeft(T), dist = Math.max(0, R.stopCh[T.alightIdx] - T.disp);
+    tripUI.alight.textContent = '🏁 Alight at ' + stopName(R.codes[T.alightIdx]) + ' (#' + (T.alightIdx + 1) + ')';
+    tripUI.stops.textContent = left;
+    tripUI.dist.textContent = fmtDist(dist);
+    let mins;
+    if (T.ltaEta && !T.sim) mins = minsUntil(T.ltaEta);
+    else mins = Math.round(dist / Math.max(T.speed || 0, 5) / 60);
+    tripUI.eta.textContent = mins == null ? '–' : (mins <= 0 ? '<1 min' : '≈' + mins + ' min');
+  }
+  tripUI.src.textContent = T.sim ? '🧪 Simulated ride' : (T.gpsFresh ? '📡 Position from your GPS' : (T.myVid ? '🕒 GPS weak – using LTA estimate' : '⏳ Waiting for GPS…'));
+}
+function tripProgress() {
+  const T = state.trip; if (!T) return;
+  updateStops(false);
+  updateTripPanel(false);
+  if (T.alightIdx == null) return;
+  const R = T.R, left = stopsLeft(T);
+  const ahead = R.stopCh.findIndex(c => c > T.disp + 20);
+  const name = stopName(R.codes[T.alightIdx]);
+  if (left <= ALERT_STOPS && left > 1 && !T.alerts.first) {
+    T.alerts.first = true;
+    showAlert(left + ' stops to go', 'Next: ' + stopName(R.codes[ahead]) + ', then your stop: ' + name + '.');
+    buzz([300, 150, 300]); beep(2);
+  }
+  if (left === 1 && !T.alerts.next) {
+    T.alerts.first = T.alerts.next = true;
+    showAlert('Your stop is next!', 'Press the bell now – alight at ' + name + '.', true);
+    buzz([600, 200, 600, 200, 600]); beep(4);
+  }
+  const ac = R.stopCh[T.alightIdx];
+  const dwelling = T.sim && T.simState && Date.now() < T.simState.dwellUntil;
+  const busLL = toLL(xyAt(R, T.disp));
+  const nearStop = distM(busLL, stopLL(R.codes[T.alightIdx])) < 30;      // safety net for data gaps
+  if ((T.disp >= ac - 20 && (T.speed < 1.5 || T.disp > ac + 15 || dwelling)) || (nearStop && (T.speed < 1.5 || dwelling))) onArrived();
+}
+
+// Simulation: drives a fake GPS along the route, dwelling at every stop
+function startSim() {
+  const T = state.trip;
+  T.simState = { ch: T.fixCh, dwellUntil: Date.now() + 3000, mult: 4, last: Date.now() };
+  clearInterval(T.simTimer);
+  T.simTimer = setInterval(() => {
+    if (state.trip !== T) return;
+    const S = T.simState, now = Date.now(), dt = (now - S.last) / 1000; S.last = now;
+    if (now >= S.dwellUntil) {
+      const v = 11 * S.mult; let ch = S.ch + v * dt;
+      const ns = T.R.stopCh.findIndex(c => c > S.ch + 1);
+      if (ns >= 0 && ch >= T.R.stopCh[ns]) { ch = T.R.stopCh[ns]; S.dwellUntil = now + 12000 / S.mult; }
+      S.ch = Math.min(ch, T.R.length);
+    }
+    tripOnFix(toLL(xyAt(T.R, S.ch)), 5, now, true);
+  }, 500);
+}
+
+// ======================= ARRIVED → CONNECTING BUSES =======================
+function onArrived() {
+  const T = state.trip; if (!T) return;
+  const code = T.R.codes[T.alightIdx], fromNo = T.no;
+  buzz([200, 100, 200]); beep(2);
+  $('alertBox').hidden = true;
+  enterMode('arrived', '📍 ' + stopName(code));
+  setPoll(null); clearRoute();
+  const here = stopLL(code);
+  const nearby = Object.entries(state.stops)
+    .map(([c, s]) => ({ code: c, d: distM(here, [s[0], s[1]]) }))
+    .filter(x => x.d <= 150).sort((a, b) => a.d - b.d).slice(0, 10);
+  state.arrived = { code, fromNo, nearby };
+  map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: here }, properties: {} });
+  map.easeTo({ center: here, zoom: 17, pitch: 50, duration: 900 });
+  renderConnect(null);
+  setPoll(pollConnect, 30000);
+}
+async function pollConnect() {
+  const A = state.arrived; if (!A) return;
+  const token = state.pollToken;
+  try {
+    const data = await api('/multi-arrival?stops=' + A.nearby.map(x => x.code).join(','));
+    if (token !== state.pollToken || state.arrived !== A) return;
+    renderConnect(data);
+  } catch (e) { if (state.arrived === A) renderConnect({ error: e.message }); }
+}
+function renderConnect(data) {
+  const A = state.arrived; if (!A) return;
+  const groups = [];
+  for (const { code, d } of A.nearby) {
+    const live = data && data.stops ? data.stops[code] || [] : [];
+    const services = (state.stopServices[code] || []).filter(no => boardableDir(no, code) >= 0);
+    if (!services.length) continue;
+    const rows = services.map(no => {
+      const sv = live.find(x => x.ServiceNo === no);
+      const buses = sv ? sv.buses : [];
+      const first = buses[0] ? Date.parse(buses[0].eta) : Infinity;
+      return { no, buses, first };
+    }).sort((a, b) => a.first - b.first || naturalSort(a.no, b.no));
+    groups.push(h('div', { class: 'grp' }, stopName(code) + ' ', h('small', null, code + (d > 5 ? ' · ' + fmtDist(d) + ' away' : ' · this stop'))));
+    for (const r of rows) {
+      const b0 = r.buses[0] || {};
+      const destCode = b0.dest || (() => { const R = getRoute(r.no, boardableDir(r.no, code)); return R.codes[R.codes.length - 1]; })();
+      groups.push(h('div', { class: 'arr tap', onclick: () => startWaiting(r.no, code, A) },
+        h('span', { class: 'chip' }, r.no),
+        h('div', { class: 'info' }, h('div', { class: 'dest' }, '→ ' + stopName(destCode)),
+          h('div', { class: 'times' }, data ? timePills(r.buses) : h('span', { class: 'meta' }, 'Loading…'))),
+        h('span', { class: 'meta' }, '›')));
+    }
+  }
+  setPanel(
+    panelHead('You have arrived', null, A.fromNo),
+    h('div', { class: 'sub' }, stopName(A.code) + ' (' + A.code + ')'),
+    h('div', { class: 'big', style: 'font-size:18px' }, 'Connecting bus? Pick the service you are taking next.'),
+    data && data.error ? h('div', { class: 'note' }, '⚠ ' + data.error) : null,
+    groups.length ? groups : h('div', { class: 'note' }, 'No services found nearby.'),
+    legend(),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: resetAll }, 'No thanks – finish'),
+      data ? h('span', { class: 'meta' }, 'Updated ' + hhmm()) : null));
+}
+
+// ======================= WAITING FOR A BUS =======================
+function startWaiting(no, code, fromArrived) {
+  const dir = boardableDir(no, code);
+  if (dir < 0) return toast('Service ' + no + ' does not depart from this stop');
+  const R = getRoute(no, dir);
+  const idx = R.codes.findIndex((c, i) => c === code && i < R.codes.length - 1);
+  enterMode('waiting', '⏱ ' + no + ' at ' + stopName(code));
+  state.wait = { no, R, code, idx, alightIdx: null, fitted: false, next: null, after: null, fromArrived, lastCh: null, moveCount: 0 };
+  renderRoute(R);
+  const ll = stopLL(code);
+  map.easeTo({ center: ll, zoom: 16, pitch: 55, duration: 800 });
+  renderWaitPanel();
+  setPoll(pollWaiting);
+}
+let waitUI = null;
+function renderWaitPanel() {
+  const W = state.wait; if (!W) return;
+  waitUI = { count: h('div', { class: 'big' }, 'Checking…'), info: h('div', { class: 'sub' }), then: h('div', { class: 'sub' }), upd: h('div', { class: 'status' }) };
+  setPanel(
+    panelHead('Bus ' + W.no + ' → ' + W.R.dest, null, W.no),
+    h('div', { class: 'sub' }, 'Waiting at ' + stopName(W.code) + ' (#' + (W.idx + 1) + ')'),
+    waitUI.count, waitUI.info, waitUI.then,
+    h('div', { class: 'sub' }, W.alightIdx != null ? '🏁 Alighting at ' + stopName(W.R.codes[W.alightIdx]) : 'Alighting stop not chosen yet'),
+    h('div', { class: 'row' },
+      h('button', { class: 'pill', onclick: () => openAlightPicker(true) }, W.alightIdx != null ? 'Change stop' : 'Choose alighting stop'),
+      h('button', { class: 'pill red', onclick: () => boardNow() }, "I'm on board ▶")),
+    h('div', { class: 'row' },
+      W.fromArrived ? h('button', { class: 'pill', onclick: backToList }, '‹ Back to list') : null,
+      h('label', { class: 'check', style: 'margin:0' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = state.simPref; c.onchange = () => state.simPref = c.checked; return c; })(), 'Simulate ride')),
+    waitUI.upd, legend());
+  updateWaitPanel();
+}
+function updateWaitPanel() {
+  const W = state.wait; if (!W || !waitUI) return;
+  const n = W.next, a = W.after;
+  if (!W.loaded) return;
+  if (!n) { waitUI.count.textContent = 'No live arrival right now'; waitUI.info.textContent = 'The service may not be operating.'; waitUI.then.textContent = ''; }
+  else {
+    const m = minsUntil(Date.parse(n.eta));
+    waitUI.count.textContent = m <= 0 ? 'Bus ' + W.no + ' arriving now' : 'Next bus in ' + m + ' min';
+    waitUI.info.textContent = [LOAD_TXT[n.load], TYPE_TXT[n.type], n.feature === 'WAB' ? '♿ Wheelchair accessible' : '', n.lat ? '' : '(position not available)'].filter(Boolean).join(' · ');
+    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(Date.parse(a.eta))) + ' (dark red bus) · ' + (LOAD_TXT[a.load] || '') : '';
+  }
+  waitUI.upd.textContent = 'Updated ' + hhmm();
+}
+async function pollWaiting() {
+  const W = state.wait; if (!W) return;
+  const R = W.R, token = state.pollToken, idxs = [];
+  for (let i = Math.max(0, W.idx - 15); i <= W.idx; i++) idxs.push(i);
+  for (let i = W.idx - 19; i > 0 && idxs.length < 22; i -= 4) idxs.push(i);
+  try {
+    const data = await fetchServiceData(R, idxs);
+    if (token !== state.pollToken || state.wait !== W) return;
+    const now = Date.now();
+    mergeVehicles(vehiclesFrom(R, data, now));
+    const atS = ((data.stops || {})[W.code] || []).filter(o => o.eta).sort((x, y) => Date.parse(x.eta) - Date.parse(y.eta));
+    W.next = atS[0] || null; W.after = atS[1] || null; W.loaded = true;
+    const keyOf = o => o && o.lat ? o.lat.toFixed(5) + ',' + o.lng.toFixed(5) : null;
+    const k1 = keyOf(W.next), k2 = keyOf(W.after);
+    for (const v of state.vehicles) v.role = v.key === k1 ? 'main' : v.key === k2 ? 'second' : 'hidden';
+    updateWaitPanel();
+    const mv = state.vehicles.find(v => v.role === 'main');
+    if (mv && !W.fitted && !state.userMoved) {
+      W.fitted = true;
+      const b = new maplibregl.LngLatBounds(); b.extend(stopLL(W.code)); b.extend(toLL(xyAt(R, mv.disp)));
+      map.fitBounds(b, { padding: { top: 140, bottom: $('panel').offsetHeight + 40, left: 60, right: 60 }, maxZoom: 16.5, duration: 900 });
+    }
+  } catch (e) { if (waitUI) waitUI.upd.textContent = '⚠ ' + e.message; }
+}
+// Auto-switch to on-board once your GPS moves along the route past the boarding stop
+function waitOnFix(ll, acc, t) {
+  const W = state.wait; if (!W || acc > 60) return;
+  const R = W.R, chS = R.stopCh[W.idx];
+  const r = projectRange(R, toXY(ll), chS - 100, chS + 1500);
+  if (!r || r.d > 50) { W.moveCount = 0; return; }
+  if (W.lastCh != null && r.ch > W.lastCh + 3 && r.ch > chS + 60) W.moveCount++; else if (r.ch <= chS + 60) W.moveCount = 0;
+  W.lastCh = r.ch;
+  if (W.moveCount >= 2) { toast('You are on board – tracking bus ' + W.no); boardNow(false); }
+}
+function boardNow(sim = state.simPref) {
+  const W = state.wait; if (!W) return;
+  state.wait = null;
+  startTrip(W.no, W.R.dir, { sim, boardIdx: W.idx, alightIdx: W.alightIdx });
+}
+function backToList() {
+  const W = state.wait; if (!W || !W.fromArrived) return;
+  const A = W.fromArrived;
+  state.wait = null; setPoll(null); clearRoute();
+  enterMode('arrived', '📍 ' + stopName(A.code));
+  state.arrived = A;
+  map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: stopLL(A.code) }, properties: {} });
+  map.easeTo({ center: stopLL(A.code), zoom: 17, duration: 700 });
+  renderConnect(null);
+  setPoll(pollConnect, 30000);
+}
+
+// ======================= RESTART / SETTINGS =======================
+function confirmRestart() { $('confirmRestart').hidden = false; }
+$('restartBtn').onclick = confirmRestart;
+$('restartNo').onclick = () => $('confirmRestart').hidden = true;
+$('restartYes').onclick = () => { $('confirmRestart').hidden = true; resetAll(); };
+function resetAll() {
+  setPoll(null);
+  stopTrip();
+  state.setup = state.wait = state.arrived = null;
+  state.userMoved = false;
+  enterMode('browse');
+  clearRoute(); hidePanel();
+  $('alertBox').hidden = true; $('routeBar').hidden = true; $('q').value = '';
+  history.replaceState(null, '', location.pathname);
+  map.easeTo({ center: state.user ? state.user.ll : [103.8198, 1.3521], zoom: state.user ? 15.5 : 11, pitch: 50, bearing: -15, duration: 900 });
+  toast('Restarted');
+}
+
+$('settingsBtn').onclick = () => { $('apiInput').value = API; $('testResult').textContent = ''; $('settings').hidden = false; };
+$('cancelBtn').onclick = () => $('settings').hidden = true;
+$('saveBtn').onclick = () => {
+  API = $('apiInput').value.trim().replace(/\/+$/, '');
+  store.set('busApi', API);
+  $('settings').hidden = true;
+  toast(API ? 'Proxy saved' : 'Proxy cleared');
+  if (state.pollFn) state.pollFn();
+};
+$('testBtn').onclick = async () => {
+  const url = $('apiInput').value.trim().replace(/\/+$/, ''), out = $('testResult');
+  if (!url) { out.textContent = 'Enter a URL first.'; return; }
+  out.style.color = ''; out.textContent = 'Testing…';
+  try {
+    const r = await fetch(url + '/multi-arrival?stops=83139');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    out.style.color = '#0a8a3a';
+    out.textContent = '✓ Working (v2) – ' + ((d.stops || {})['83139'] || []).length + ' services at test stop 83139';
+  } catch (e) {
+    out.style.color = '#c62828';
+    out.textContent = '✗ ' + e.message + ' – is the Worker updated to v2?';
+  }
+};
+</script>
+</body>
+</html>
