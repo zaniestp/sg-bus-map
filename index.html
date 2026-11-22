@@ -370,6 +370,25 @@ function segIndexAt(R, ch) {
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (R.cum[mid] <= ch) lo = mid; else hi = mid - 1; }
   return lo;
 }
+// Every separate pass of the route within maxD of a point (e.g. outbound AND return on a shared road)
+function passCandidates(R, p, maxD = 80) {
+  const out = []; let run = null;
+  for (let i = 0; i < R.xy.length - 1; i++) {
+    const r = projSeg(R, p, i);
+    if (r.d <= maxD) { if (!run || r.d < run.d) run = r; }
+    else if (run) { out.push(run); run = null; }
+  }
+  if (run) out.push(run);
+  const merged = [];
+  for (const c of out) { const m = merged[merged.length - 1]; if (m && c.ch - m.ch < 80) { if (c.d < m.d) merged[merged.length - 1] = c; } else merged.push(c); }
+  return merged;
+}
+// Does a movement vector (metres) go the same way as the route at chainage ch?
+function movesWithRoute(R, ch, mv) {
+  const len = Math.hypot(mv[0], mv[1]); if (len < 1) return 0;
+  const th = headingAt(R, ch, 15);
+  return (mv[0] * Math.sin(th) + mv[1] * Math.cos(th)) / len;     // +1 same way, −1 opposite
+}
 // Nearest point on route between two chainages
 function projectRange(R, p, ch0 = 0, ch1 = Infinity) {
   const i0 = segIndexAt(R, clamp(ch0, 0, R.length)), i1 = segIndexAt(R, clamp(ch1, 0, R.length));
@@ -889,18 +908,21 @@ setInterval(() => refreshTheme(false), 60000);
 let firstFix = true;
 function startLocation() {
   if (!('geolocation' in navigator)) { toast('Location not supported on this device'); return; }
-  navigator.geolocation.watchPosition(pos => {
+  navigator.geolocation.watchPosition(handlePosition, err => {
+    toast(err.code === 1 ? 'Location permission denied – allow it in browser settings' : 'Location unavailable');
+  }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+}
+function handlePosition(pos) {
+  {
     const ll = [pos.coords.longitude, pos.coords.latitude], t = Date.now();
-    state.user = { ll, acc: pos.coords.accuracy, t };
+    state.user = { ll, acc: pos.coords.accuracy, t, heading: pos.coords.heading, speed: pos.coords.speed };
     map.getSource('me') && map.getSource('me').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: ll }, properties: {} });
     if (firstFix && state.mode === 'browse' && !state.R) { map.easeTo({ center: ll, zoom: 15.5, duration: 1200 }); }
     firstFix = false;
     if (state.mode === 'setup') setupOnFix(ll, t);
     else if (state.mode === 'onboard') tripOnFix(ll, pos.coords.accuracy, t, false);
     else if (state.mode === 'waiting') waitOnFix(ll, pos.coords.accuracy, t);
-  }, err => {
-    toast(err.code === 1 ? 'Location permission denied – allow it in browser settings' : 'Location unavailable');
-  }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+  }
 }
 $('locateBtn').onclick = () => {
   if (!state.user) return toast('Waiting for your location…');
@@ -1634,23 +1656,62 @@ function chooseDirection(dir) {
 function startTrip(no, dir, o = {}) {
   unlockAudio();
   const R = getRoute(no, dir);
-  let ch0 = o.boardIdx != null ? R.stopCh[o.boardIdx] : 0, fixT = 0;
+  let ch0 = o.boardIdx != null ? R.stopCh[o.boardIdx] : 0, fixT = 0, pending = null;
   if (!o.sim && state.user && Date.now() - state.user.t < 30000) {
-    const lo = o.boardIdx != null ? R.stopCh[o.boardIdx] - 200 : 0;
-    const r = projectRange(R, toXY(state.user.ll), lo, Infinity);
-    if (r && r.d < 150) { ch0 = r.ch; fixT = state.user.t; }
+    const p = toXY(state.user.ll);
+    let cands = passCandidates(R, p, 80);
+    if (o.boardIdx != null) cands = cands.filter(c => c.ch > R.stopCh[o.boardIdx] - 200 && c.ch < R.stopCh[o.boardIdx] + 1500);
+    if (cands.length > 1) {
+      // Same road used twice (loop or out-and-back): try the phone's heading first, else wait for movement
+      const u = state.user;
+      if (u.heading != null && !isNaN(u.heading) && u.speed > 2) {
+        const mv = [Math.sin(u.heading * Math.PI / 180), Math.cos(u.heading * Math.PI / 180)];
+        const ok = cands.filter(c => movesWithRoute(R, c.ch, mv) > 0.5);
+        if (ok.length === 1) cands = ok;
+      }
+    }
+    if (cands.length === 1) { ch0 = cands[0].ch; fixT = state.user.t; }
+    else if (cands.length > 1) {
+      cands.sort((a, b) => a.d - b.d);
+      ch0 = cands[0].ch; fixT = state.user.t;
+      pending = { cands: cands.map(c => ({ ch: c.ch })), from: p, t: state.user.t };
+    } else {
+      const r = projectRange(R, p); if (r && r.d < 150) { ch0 = r.ch; fixT = state.user.t; }
+    }
   }
   setPoll(null);
   enterMode('onboard', '🚌 ' + no + ' → ' + R.dest);
   state.trip = { no, dir, R, sim: !!o.sim, alightIdx: null, fixCh: ch0, fixT, speed: 0, disp: ch0, alerts: {},
-                 follow: true, offCount: 0, myVid: null, ltaEta: null, camBearing: null, simState: null, simTimer: null };
+                 follow: true, offCount: 0, myVid: null, ltaEta: null, camBearing: null, simState: null, simTimer: null,
+                 pending, wantAlight: o.alightIdx, hist: [], switchVotes: 0, switchCh: null };
   renderRoute(R);
   map.setPadding({ top: Math.round(innerHeight * 0.3), bottom: 0, left: 0, right: 0 });
   map.jumpTo({ center: toLL(xyAt(R, ch0)), zoom: 17.2, pitch: 62, bearing: headingAt(R, ch0, 20) * 180 / Math.PI });
   if (o.sim) startSim();
   setPoll(pollOnboard);
-  if (o.alightIdx != null && R.stopCh[o.alightIdx] > ch0 + 20) { setAlight(o.alightIdx); }
+  if (pending) renderTripPanel();                 // shows "Which way is the bus going?" until the leg is known
+  else if (o.alightIdx != null && R.stopCh[o.alightIdx] > ch0 + 20) { setAlight(o.alightIdx); }
   else openAlightPicker();
+}
+// The leg is known (from movement or a tap): jump there and carry on
+function resolveLeg(ch, why) {
+  const T = state.trip; if (!T || !T.pending) return;
+  T.pending = null; T.fixCh = ch; T.disp = ch; T.fixT = Date.now(); T.camBearing = null; T.alerts = {};
+  state.stopSig = ''; updateStops(true);
+  const nx = nextStopIdx(T.R, ch);
+  if (why) toast('Tracking: next stop ' + stopName(T.R.codes[Math.max(0, nx)]));
+  if (T.wantAlight != null && T.R.stopCh[T.wantAlight] > ch + 20) setAlight(T.wantAlight);
+  else if (T.alightIdx == null) openAlightPicker();
+  else renderTripPanel();
+}
+function legLabel(R, ch) {
+  const nx = R.stopCh.findIndex(c => c > ch + 20);
+  const next = nx >= 0 ? stopName(R.codes[nx]) + ' (' + R.codes[nx] + ')' : 'End of route';
+  if (isLoopRoute(R)) {
+    const t = loopTurnCh(R), turnIdx = R.stopCh.findIndex(c => c >= t);
+    return { title: ch < t ? 'Outbound → ' + stopName(R.codes[Math.max(0, turnIdx)]) : 'Return → ' + R.dest, next };
+  }
+  return { title: '→ ' + R.dest, next };
 }
 function stopTrip() {
   const T = state.trip; if (!T) return;
@@ -1664,18 +1725,57 @@ $('followBtn').onclick = followOn;
 function tripOnFix(ll, acc, t, isSim) {
   const T = state.trip; if (!T || T.sim !== isSim) return;
   if (acc > 60) return;
-  const p = toXY(ll);
-  const r = T.fixT ? projectRange(T.R, p, T.fixCh - 150, T.fixCh + 1500) : projectRange(T.R, p);
-  if (!r || r.d > 80) {
+  const R = T.R, p = toXY(ll);
+  T.hist.push({ p, t }); T.hist = T.hist.filter(h => t - h.t < 30000);
+  // movement over the last few seconds (needs ≥ 8 m to be meaningful)
+  let mv = null;
+  for (let i = T.hist.length - 2; i >= 0; i--) {
+    const d = [p[0] - T.hist[i].p[0], p[1] - T.hist[i].p[1]];
+    if (Math.hypot(d[0], d[1]) >= 8) { mv = d; break; }
+  }
+
+  // 1) Leg not known yet (shared road): pick the pass whose direction matches the movement
+  if (T.pending) {
+    const live = T.pending.cands.map(c => {
+      const r = projectRange(R, p, c.ch - 150, c.ch + 600);
+      return r && r.d < 70 ? r : null;
+    });
+    T.pending.cands.forEach((c, i) => { if (live[i]) c.ch = Math.max(c.ch, live[i].ch); });
+    const moved = Math.hypot(p[0] - T.pending.from[0], p[1] - T.pending.from[1]);
+    if (moved >= 20) {
+      const mvAll = [p[0] - T.pending.from[0], p[1] - T.pending.from[1]];
+      const ok = T.pending.cands.map((c, i) => ({ c, i, s: live[i] ? movesWithRoute(R, live[i].ch, mvAll) : -1 })).filter(x => x.s > 0.5);
+      if (ok.length === 1) { resolveLeg(live[ok[0].i].ch, 'auto'); return; }
+    }
+    T.fixT = t;                                  // GPS is fine, just waiting for the bus to move
+    return;
+  }
+
+  // 2) Normal tracking near the current position
+  const r = projectRange(R, p, T.fixCh - 150, T.fixCh + 1500);
+  const wrongWay = mv && r && movesWithRoute(R, r.ch, mv) < -0.5;
+  if (!r || r.d > 80 || wrongWay) {
+    // Another pass of the route that fits the position AND the direction of travel? Switch after 3 votes.
+    const alt = mv ? passCandidates(R, p, 50).filter(c => Math.abs(c.ch - T.fixCh) > 200 && movesWithRoute(R, c.ch, mv) > 0.5) : [];
+    if (alt.length) {
+      const best = alt.sort((a, b) => a.d - b.d)[0];
+      T.switchVotes = T.switchCh != null && Math.abs(best.ch - T.switchCh) < 300 ? T.switchVotes + 1 : 1;
+      T.switchCh = best.ch;
+      if (T.switchVotes >= 3) {
+        T.fixCh = best.ch; T.disp = best.ch; T.fixT = t; T.switchVotes = 0; T.switchCh = null; T.offCount = 0;
+        T.camBearing = null; state.stopSig = ''; updateStops(true);
+        toast('Re-tracked – next stop ' + stopName(R.codes[Math.max(0, nextStopIdx(R, best.ch))]));
+      }
+      return;
+    }
+    if (r && r.d <= 80) { T.fixT = t; return; }  // on the road but direction unclear: hold, stay "fresh"
     if (++T.offCount === 6) toast('You seem to be off the ' + T.no + ' route – check the bus number or direction', 5000);
     return;
   }
-  T.offCount = 0;
-  if (T.fixT) {
-    const dt = (t - T.fixT) / 1000;
-    if (dt > 0.3) T.speed = clamp(T.speed * 0.6 + Math.max(0, (r.ch - T.fixCh) / dt) * 0.4, 0, 25);
-    if (r.ch < T.fixCh) { T.fixT = t; return; }   // never move back on GPS jitter (fix still counts as fresh)
-  }
+  T.offCount = 0; T.switchVotes = 0; T.switchCh = null;
+  const dt = (t - T.fixT) / 1000;
+  if (T.fixT && dt > 0.3) T.speed = clamp(T.speed * 0.6 + Math.max(0, (r.ch - T.fixCh) / dt) * 0.4, 0, 25);
+  if (r.ch < T.fixCh) { T.fixT = t; return; }   // never move back on GPS jitter (fix still counts as fresh)
   T.fixCh = r.ch; T.fixT = t;
 }
 function updateOwnBus(now, k) {
@@ -1752,6 +1852,15 @@ function renderTripPanel() {
   const T = state.trip; if (!T) return;
   tripUI = { next: h('div', { class: 'big' }), alight: h('div', { class: 'sub' }), stops: h('b'), dist: h('b'), eta: h('b'), src: h('div', { class: 'status' }) };
   const simBtn = T.sim ? h('button', { class: 'pill', onclick: e => { const s = T.simState; s.mult = s.mult === 1 ? 4 : s.mult === 4 ? 10 : 1; e.target.textContent = 'Sim ' + s.mult + '×'; } }, 'Sim ' + (T.simState ? T.simState.mult : 4) + '×') : null;
+  if (T.pending) {
+    setPanelKeyed('trip-leg',
+      panelHead('On bus ' + T.no, null, T.no),
+      h('div', { class: 'sub' }, 'This road is used in both directions. Which way is the bus going? It will be picked automatically once the bus moves.'),
+      T.pending.cands.map(c => { const L = legLabel(T.R, c.ch); return h('button', { class: 'dirbtn', onclick: () => resolveLeg(c.ch) }, h('b', null, L.title), h('div', { class: 'sub', style: 'margin:2px 0 0' }, 'Next stop: ' + L.next)); }),
+      h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => confirmRestart() }, 'End trip')));
+    setPanelSummary(() => '🚌 ' + T.no + ' · detecting direction…');
+    return;
+  }
   setPanelKeyed('trip',
     panelHead('On bus ' + T.no + ' → ' + T.R.dest, null, T.no),
     h('div', { class: 'sub' }, 'Next stop'), tripUI.next,
@@ -1805,7 +1914,7 @@ function updateTripPanel(force) {
   tripUI.src.textContent = T.sim ? '🧪 Simulated ride' : (T.gpsFresh ? '📡 Position from your GPS' : (T.myVid ? '🕒 GPS weak – using LTA estimate' : '⏳ Waiting for GPS…'));
 }
 function tripProgress() {
-  const T = state.trip; if (!T) return;
+  const T = state.trip; if (!T || T.pending) return;
   updateStops(false);
   updateTripPanel(false);
   if (T.alightIdx == null) return;
