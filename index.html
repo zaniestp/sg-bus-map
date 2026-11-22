@@ -430,8 +430,10 @@ function chAt(nodes, t) {
   return nodes[0].ch;
 }
 // Smooth towards target; never creep backwards for small corrections
+// Smooth towards target. Buses never drive backwards: if the estimate falls behind the drawn
+// position the bus waits in place; only a big mismatch (> 400 m) makes it jump.
 function smoothCh(disp, target, k) {
-  if (target < disp && disp - target < 60) return disp;
+  if (target < disp) return disp - target > 400 ? target : disp;
   return disp + (target - disp) * k;
 }
 
@@ -1173,7 +1175,16 @@ function vehiclesFrom(R, data, now) {
   }
   const out = [];
   for (const g of groups.values()) {
-    const r = projectRange(R, toXY(g.ll));
+    const p = toXY(g.ll), obs = g.obs.filter(o => !isNaN(o.t)).sort((x, y) => x.t - y.t);
+    if (!obs.length) continue;
+    // The stop this bus reaches first must be just ahead of it, so only look at the stretch before
+    // that stop (handles loops and roads the route uses twice).
+    let r = null;
+    for (const i of R.idxOf[obs[0].code] || []) {
+      const c = R.stopCh[i], cand = projectRange(R, p, c - 3000, c + 30);
+      if (cand && (!r || cand.d < r.d)) r = cand;
+    }
+    if (!r) r = projectRange(R, p);
     if (!r || r.d > 150) continue;
     const anchors = [], etaByCode = {};
     for (const o of g.obs) {
@@ -1181,18 +1192,32 @@ function vehiclesFrom(R, data, now) {
       const chs = (R.idxOf[o.code] || []).map(i => R.stopCh[i]).filter(c => c > r.ch - 20).sort((a, b) => a - b);
       if (chs.length && !isNaN(o.t)) anchors.push({ ch: Math.max(chs[0], r.ch), t: o.t });
     }
-    out.push({ key: g.key, ch0: r.ch, nodes: buildSchedule(r.ch, now, anchors, R.stopCh), type: g.type, load: g.load, etaByCode, role: 'main' });
+    out.push({ key: g.key, ch0: r.ch, anchors, nodes: buildSchedule(r.ch, now, anchors, R.stopCh), type: g.type, load: g.load, etaByCode, role: 'main', firstEta: obs[0].t });
   }
   return out;
 }
 function mergeVehicles(fresh) {
-  const old = state.vehicles, used = new Set();
-  fresh.sort((a, b) => a.ch0 - b.ch0);
-  for (const v of fresh) {
-    let best = null, bd = 300;
-    for (const o of old) { if (used.has(o)) continue; const d = Math.abs(o.disp - v.ch0); if (d < bd) { bd = d; best = o; } }
-    if (best) { used.add(best); v.id = best.id; v.disp = best.disp; } else { v.id = ++state.vid; v.disp = v.ch0; }
+  const old = state.vehicles, now = Date.now(), R = state.R;
+  // Score every old/new pair, then match best fits first (keeps close buses from swapping)
+  const pairs = [];
+  for (const n of fresh) for (const o of old) {
+    const gap = n.ch0 - o.disp;                       // + = new data ahead of drawn bus
+    if (gap < -400 || gap > 900) continue;            // too far apart to be the same bus
+    const etaDiff = o.firstEta && n.firstEta ? Math.abs(o.firstEta - n.firstEta) / 1000 : 0;
+    pairs.push({ n, o, cost: Math.abs(gap) + (gap < 0 ? 0.5 * -gap : 0) + 0.5 * Math.min(etaDiff, 300) + (o.key === n.key ? -100 : 0) });
   }
+  pairs.sort((a, b) => a.cost - b.cost);
+  const usedN = new Set(), usedO = new Set();
+  for (const { n, o } of pairs) {
+    if (usedN.has(n) || usedO.has(o)) continue;
+    usedN.add(n); usedO.add(o);
+    n.id = o.id; n.disp = o.disp;
+    if (o.disp > n.ch0 && o.disp - n.ch0 <= 400 && R) {
+      // LTA's position lags its arrival times: carry on from where the bus is drawn instead of reversing
+      n.nodes = buildSchedule(o.disp, now, n.anchors.filter(a => a.ch > o.disp + 5), R.stopCh);
+    }
+  }
+  for (const n of fresh) if (!usedN.has(n)) { n.id = ++state.vid; n.disp = n.ch0; }
   state.vehicles = fresh;
 }
 
@@ -1582,7 +1607,7 @@ function tripOnFix(ll, acc, t, isSim) {
   if (T.fixT) {
     const dt = (t - T.fixT) / 1000;
     if (dt > 0.3) T.speed = clamp(T.speed * 0.6 + Math.max(0, (r.ch - T.fixCh) / dt) * 0.4, 0, 25);
-    if (r.ch < T.fixCh - 25) return;     // ignore jumps backwards (GPS jitter)
+    if (r.ch < T.fixCh) { T.fixT = t; return; }   // never move back on GPS jitter (fix still counts as fresh)
   }
   T.fixCh = r.ch; T.fixT = t;
 }
