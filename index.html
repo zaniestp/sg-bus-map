@@ -85,6 +85,8 @@
   .phead h2 { margin: 0; font-size: 19px; flex: 1; line-height: 1.25; }
   .sub { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
   .xbtn { border: 0; background: #eee; border-radius: 50%; width: 34px; height: 34px; font-size: 16px; cursor: pointer; flex: none; }
+  .spin { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { border: 0; background: #0b7a75; color: #fff; font-weight: 700; border-radius: 8px; padding: 6px 10px; font-size: 15px; cursor: pointer; min-width: 48px; text-align: center; }
@@ -98,6 +100,7 @@
   .SEA { background: var(--green); } .SDA { background: var(--amber); } .LSD { background: var(--lsd); } .NA { background: #9e9e9e; }
   .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .note { font-size: 14px; color: var(--muted); padding: 6px 0; }
+  .code { font-size: 0.62em; font-weight: 600; color: var(--muted); margin-left: 6px; white-space: nowrap; }
   #results { position: fixed; top: calc(62px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 8; background: #fff; border-radius: 14px; box-shadow: var(--shadow); max-height: 55vh; overflow-y: auto; }
   .res { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer; }
   .res:active { background: #f1f4fa; }
@@ -191,6 +194,7 @@
   <div class="row">
     <button class="pill" id="dirBtn">⇄ Other direction</button>
     <span id="liveStatus"></span>
+    <button class="pill" id="routeRefresh" title="Refresh live buses" aria-label="Refresh">↻</button>
     <button class="pill" id="clearBtn" aria-label="Clear route">✕</button>
   </div>
 </div>
@@ -218,7 +222,7 @@
     <div id="testResult"></div>
     <h2 style="margin-top:14px">Theme</h2>
     <select id="themeSel" class="field">
-      <option value="auto">Auto (morning yellow · afternoon white · night dark)</option>
+      <option value="auto">Auto (7am yellow · 9am white · 7pm dark)</option>
       <option value="morning">Morning – bright yellow</option>
       <option value="afternoon">Afternoon – normal white</option>
       <option value="night">Night – dark</option>
@@ -707,17 +711,27 @@ function addLayers() {
     });
   }
   captureBaseColors();
-  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop', 'road-stops', 'shelters']) {
+  for (const id of ['all-stops', 'route', 'route-stops', 'trees', 'buses', 'bus-pts', 'me', 'sel-stop', 'road-stops', 'shelters', 'opp-stops']) {
     map.addSource(id, { type: 'geojson', data: emptyFC() });
   }
   map.addLayer({ id: 'all-stops', type: 'circle', source: 'all-stops', minzoom: 15,
     paint: { 'circle-radius': 5, 'circle-color': '#fff', 'circle-stroke-color': '#0b7a75', 'circle-stroke-width': 2 } });
-  map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 6, 17, 16] } });
-  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#3d5afe', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 17, 10] } });
+  // Route legs: 'mine' (dark blue), 'other' (other leg of a loop, orange), 'opp' (opposite direction, faint orange).
+  // Each line is nudged to its left so both directions show side by side on shared roads.
+  const legOffset = ['interpolate', ['linear'], ['zoom'], 12, -1.5, 15, -3.5, 18, -4.5];
+  map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['match', ['get', 'leg'], 'mine', 3, 'other', 2, 1] },
+    paint: { 'line-color': '#ffffff', 'line-offset': legOffset, 'line-opacity': ['match', ['get', 'leg'], 'opp', 0.45, 1],
+             'line-width': ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 4, 6], 17, ['match', ['get', 'leg'], 'opp', 10, 16]] } });
+  map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['match', ['get', 'leg'], 'mine', 3, 'other', 2, 1] },
+    paint: { 'line-color': ['match', ['get', 'leg'], 'mine', '#1e3a8a', '#ff9100'], 'line-offset': legOffset,
+             'line-opacity': ['match', ['get', 'leg'], 'opp', 0.5, 0.9],
+             'line-width': ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 2, 3.5], 17, ['match', ['get', 'leg'], 'opp', 6, 10]] } });
   map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 15,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
+  map.addLayer({ id: 'opp-stops', type: 'circle', source: 'opp-stops', minzoom: 14.5,
+    paint: { 'circle-radius': 5, 'circle-color': '#ff9100', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
   map.addLayer({ id: 'shelters', type: 'fill-extrusion', source: 'shelters', minzoom: 15.5,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'buses', type: 'fill-extrusion', source: 'buses',
@@ -733,7 +747,8 @@ function addLayers() {
                         15.5, ['match', ['get', 'status'], 'next', 11, 'alight', 12, 'board', 12, 10], 16.5, 7, 18, 7],   // shrinks to a badge once 3D shelters show
       'circle-color': ['match', ['get', 'status'], 'passed', COLORS.stopPassed, COLORS.stop],
       'circle-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1],
-      'circle-stroke-color': ['match', ['get', 'status'], 'alight', '#ffc400', 'board', '#00e676', 'next', '#82b1ff', '#ffffff'],
+      'circle-stroke-color': ['case', ['==', ['get', 'status'], 'alight'], '#ffc400', ['==', ['get', 'status'], 'board'], '#00e676',
+                              ['==', ['get', 'status'], 'next'], '#82b1ff', ['==', ['get', 'other'], true], '#ff9100', '#ffffff'],   // orange ring = other leg of a loop
       'circle-stroke-width': ['match', ['get', 'status'], 'alight', 4, 'board', 4, 'next', 3, 2],
       'circle-stroke-opacity': ['match', ['get', 'status'], 'passed', 0.6, 1]
     } });
@@ -743,7 +758,8 @@ function addLayers() {
     paint: { 'text-color': '#ffffff' } });
   map.addLayer({ id: 'route-stops-name', type: 'symbol', source: 'route-stops', minzoom: 15,
     filter: ['!=', ['get', 'status'], 'passed'],
-    layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.6],
+    layout: { 'text-field': ['step', ['zoom'], ['get', 'name'], 16.5, ['format', ['get', 'name'], {}, '\n', {}, ['get', 'code'], { 'font-scale': 0.85 }]],
+              'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.6],
               'text-anchor': 'top', 'text-optional': true },
     paint: { 'text-color': COLORS.stop, 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
   map.addLayer({ id: 'bus-label', type: 'symbol', source: 'bus-pts', minzoom: 14.5,
@@ -796,7 +812,7 @@ function captureBaseColors() {                      // remember the map style's 
     if (v !== undefined) baseColors.push([layer.id, prop, v]);
   }
 }
-function autoTheme(d = new Date()) { const hr = d.getHours(); return hr >= 6 && hr < 12 ? 'morning' : hr >= 12 && hr < 19 ? 'afternoon' : 'night'; }
+function autoTheme(d = new Date()) { const hr = d.getHours(); return hr >= 7 && hr < 9 ? 'morning' : hr >= 9 && hr < 19 ? 'afternoon' : 'night'; }   // 7–9am, 9am–7pm, 7pm–7am
 function themeChoice() { return store.get('theme') || 'auto'; }
 function refreshTheme(force) {
   const c = themeChoice(), t = c === 'auto' ? autoTheme() : c;
@@ -812,7 +828,7 @@ function applyTheme(t) {
   const night = t === 'night', key = t === 'morning' ? 'cm' : night ? 'cn' : 'c';
   for (const id of ['trees', 'shelters']) map.setPaintProperty(id, 'fill-extrusion-color', ['coalesce', ['get', key], ['get', 'c']]);
   map.setPaintProperty('route-casing', 'line-color', night ? '#0b1220' : t === 'morning' ? '#fff6d6' : '#ffffff');
-  map.setPaintProperty('route-line', 'line-color', night ? '#6f86ff' : '#3d5afe');
+  map.setPaintProperty('route-line', 'line-color', ['match', ['get', 'leg'], 'mine', night ? '#7c93ff' : '#1e3a8a', '#ff9100']);
   map.setPaintProperty('route-stops-name', 'text-color', night ? '#a9c6ff' : COLORS.stop);
   map.setPaintProperty('route-stops-name', 'text-halo-color', night ? '#0b1220' : '#ffffff');
   map.setPaintProperty('all-stops', 'circle-color', night ? '#1f2937' : '#ffffff');
@@ -928,11 +944,23 @@ function placeFabs() {
 }
 window.addEventListener('resize', placeFabs);
 if ('ResizeObserver' in window) new ResizeObserver(placeFabs).observe($('panel'));
-function panelHead(title, onClose, badge) {
+function panelHead(title, onClose, badge, onRefresh) {
   return h('div', { class: 'phead' },
     badge ? h('span', { class: 'svcbadge red' }, badge) : null,
     h('h2', null, title),
+    onRefresh ? refreshButton(onRefresh) : null,
     onClose ? h('button', { class: 'xbtn', 'aria-label': 'Close', onclick: onClose }, '✕') : null);
+}
+// ↻ button: fetch now (ignored within 5 s of the last tap – LTA has nothing newer yet)
+function refreshButton(fn, el) {
+  const b = el || h('button', { class: 'xbtn', title: 'Refresh', 'aria-label': 'Refresh' }, '↻');
+  b.onclick = async e => {
+    e.stopPropagation();
+    if (Date.now() - (b._t || 0) < 5000) { toast('Just updated'); return; }
+    b._t = Date.now(); b.classList.add('spin');
+    try { await fn(); toast('Updated ' + hhmm(), 1200); } catch {} finally { b.classList.remove('spin'); }
+  };
+  return b;
 }
 function setTopMode(text) {
   const browse = state.mode === 'browse';
@@ -978,7 +1006,9 @@ document.addEventListener('visibilitychange', () => {
 function renderRoute(R, opts = {}) {
   if (state.R !== R) { state.vehicles = []; }
   state.R = R;
-  map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: R.ll }, properties: {} });
+  state.legSig = onReturnLeg();
+  map.getSource('route').setData(routeLineData(R));
+  map.getSource('opp-stops').setData(oppStopsData(R));
   if (!R.trees) R.trees = { type: 'FeatureCollection', features: buildTrees(R) };
   map.getSource('trees').setData(R.trees);
   updateShelters(state.sheetStop);
@@ -991,7 +1021,7 @@ function renderRoute(R, opts = {}) {
 }
 function clearRoute() {
   state.R = null; state.vehicles = []; state.stopSig = ''; state.drewEmpty = true;
-  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop', 'road-stops', 'shelters']) map.getSource(id) && map.getSource(id).setData(emptyFC());
+  for (const id of ['route', 'route-stops', 'trees', 'buses', 'bus-pts', 'sel-stop', 'road-stops', 'shelters', 'opp-stops']) map.getSource(id) && map.getSource(id).setData(emptyFC());
   for (const k of Object.keys(state.markers)) { if (state.markers[k]) state.markers[k].remove(); state.markers[k] = null; }
 }
 // ---------- 3D shelters for route stops + the tapped stop ----------
@@ -1016,6 +1046,45 @@ function updateShelters(extraCode) {
   src.setData({ type: 'FeatureCollection', features: feats });
 }
 
+// ---------- route legs ----------
+function isLoopRoute(R) { return state.services[R.no].routes.length === 1; }
+// Turnaround of a loop = the point furthest from the interchange
+function loopTurnCh(R) {
+  if (R.turnCh != null) return R.turnCh;
+  const p0 = R.xy[0]; let best = R.length / 2, bd = -1;
+  for (let i = 0; i < R.xy.length; i++) { const d = Math.hypot(R.xy[i][0] - p0[0], R.xy[i][1] - p0[1]); if (d > bd) { bd = d; best = R.cum[i]; } }
+  return (R.turnCh = best);
+}
+function sliceLL(R, a, b) {
+  a = clamp(a, 0, R.length); b = clamp(b, 0, R.length);
+  const out = [toLL(xyAt(R, a))];
+  for (let i = 0; i < R.cum.length; i++) if (R.cum[i] > a && R.cum[i] < b) out.push(R.ll[i]);
+  out.push(toLL(xyAt(R, b)));
+  return out;
+}
+// Is the leg you're on (or boarding) the return leg of a loop?
+function onReturnLeg() {
+  const R = state.R; if (!R || !isLoopRoute(R)) return false;
+  const t = loopTurnCh(R);
+  if (state.mode === 'onboard' && state.trip) return state.trip.disp > t;
+  if (state.mode === 'waiting' && state.wait) return R.stopCh[state.wait.idx] > t;
+  return false;
+}
+function routeLineData(R) {
+  const line = (coords, leg) => ({ type: 'Feature', properties: { leg }, geometry: { type: 'LineString', coordinates: coords } });
+  if (isLoopRoute(R)) {
+    const t = loopTurnCh(R), ret = onReturnLeg();
+    return { type: 'FeatureCollection', features: [line(sliceLL(R, 0, t), ret ? 'other' : 'mine'), line(sliceLL(R, t, R.length), ret ? 'mine' : 'other')] };
+  }
+  const O = getRoute(R.no, R.dir === 0 ? 1 : 0);
+  return { type: 'FeatureCollection', features: [line(O.ll, 'opp'), line(R.ll, 'mine')] };
+}
+function oppStopsData(R) {
+  if (isLoopRoute(R)) return emptyFC();
+  const mine = new Set(R.codes), O = getRoute(R.no, R.dir === 0 ? 1 : 0);
+  return { type: 'FeatureCollection', features: O.codes.filter(c => !mine.has(c) && state.stops[c]).map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: stopLL(c) }, properties: { code: c } })) };
+}
+
 // stop status: passed / next / alight / board / normal
 function stopStatuses() {
   const R = state.R; if (!R) return [];
@@ -1038,14 +1107,17 @@ function nextStopIdx(R, ch) { return R.stopCh.findIndex(c => c > ch - 20); }
 function stopsLeft(T) { if (T.alightIdx == null) return null; const a = T.R.stopCh.findIndex(c => c > T.disp + 20); return a < 0 ? 0 : Math.max(0, T.alightIdx - a + 1); }
 function updateStops(force) {
   const R = state.R; if (!R) return;
-  const st = stopStatuses(), sig = st.join(',');
+  const st = stopStatuses(), ret = onReturnLeg(), sig = st.join(',') + '|' + ret;
   if (!force && sig === state.stopSig) return;
   state.stopSig = sig;
+  if (ret !== state.legSig) { state.legSig = ret; map.getSource('route').setData(routeLineData(R)); }   // passed the turnaround: swap colours
+  const loop = isLoopRoute(R), turn = loop ? loopTurnCh(R) : 0;
+  const isOther = i => loop && (ret ? R.stopCh[i] <= turn : R.stopCh[i] > turn);
   map.getSource('route-stops').setData({
     type: 'FeatureCollection',
     features: R.codes.map((code, i) => {
       const s = state.stops[code]; if (!s) return null;
-      return { type: 'Feature', geometry: { type: 'Point', coordinates: [s[0], s[1]] }, properties: { code, seq: i + 1, idx: i, status: st[i], name: s[2] } };
+      return { type: 'Feature', geometry: { type: 'Point', coordinates: [s[0], s[1]] }, properties: { code, seq: i + 1, idx: i, status: st[i], name: s[2], other: isOther(i) } };
     }).filter(Boolean)
   });
   const place = (key, idx, make) => {
@@ -1061,7 +1133,7 @@ function updateStops(force) {
 // ======================= map taps =======================
 function onMapClick(e) {
   const p = e.point, pad = 14;
-  const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'all-stops'] : ['route-stops'];
+  const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
   if (!feats.length) return;
   const f = feats[0].properties;
@@ -1314,6 +1386,7 @@ $('searchForm').addEventListener('submit', e => {
 });
 $('dirBtn').onclick = () => state.R && showService(state.R.no, state.R.dir === 0 ? 1 : 0);
 $('clearBtn').onclick = clearService;
+refreshButton(() => pollBrowse(), $('routeRefresh'));
 
 // Stop sheet (browse): live arrivals first
 function openStop(code) {
@@ -1324,14 +1397,14 @@ function openStop(code) {
   const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading live arrivals…'));
   state.stopFirst = null;
   setPanelKeyed('stop:' + code,
-    panelHead(st[2], closeStop),
+    panelHead(st[2], closeStop, null, () => loadArrivals(code)),
     h('div', { class: 'sub' }, code + ' · ' + st[3] + (state.user ? ' · ' + fmtDist(distM(state.user.ll, [st[0], st[1]])) + ' away' : '')),
     (state.R && (state.stopServices[code] || []).includes(state.R.no)) ? h('div', { id: 'selSvc' }) : null,
     h('h3', null, 'Live arrivals ', h('span', { id: 'arrUpdated', style: 'text-transform:none;letter-spacing:0' })),
     arrivals,
     legend(),
     h('div', { class: 'note', style: 'font-size:12px' }, 'Tap a bus number to see its route · tap Track to follow the next bus coming here.'));
-  setPanelSummary(() => '🚏 ' + st[2] + (state.stopFirst ? ' · ' + state.stopFirst : ''));
+  setPanelSummary(() => '🚏 ' + st[2] + (st[2].length <= 16 ? ' ' + code : '') + (state.stopFirst ? ' · ' + state.stopFirst : ''));
   map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
   clearInterval(state.sheetTimer);
   loadArrivals(code);
@@ -1608,7 +1681,9 @@ function tripSummary() {
   const T = state.trip; if (!T) return '';
   const R = T.R, nx = nextStopIdx(R, T.disp);
   const atIdx = R.stopCh.findIndex(c => Math.abs(c - T.disp) <= 20);
-  let txt = '🚌 ' + T.no + ' · ' + (atIdx >= 0 ? 'At ' + stopName(R.codes[atIdx]) : nx >= 0 ? 'Next: ' + stopName(R.codes[nx]) : 'End of route');
+  const si = atIdx >= 0 ? atIdx : nx, nm = si >= 0 ? stopName(R.codes[si]) : '';
+  const withCode = si >= 0 ? nm + (nm.length <= 16 ? ' ' + R.codes[si] : '') : '';
+  let txt = '🚌 ' + T.no + ' · ' + (atIdx >= 0 ? 'At ' + withCode : nx >= 0 ? 'Next: ' + withCode : 'End of route');
   if (T.alightIdx != null) {
     const dist = Math.max(0, R.stopCh[T.alightIdx] - T.disp);
     const mins = T.ltaEta && !T.sim ? minsUntil(T.ltaEta) : Math.round(dist / Math.max(T.speed || 0, 5) / 60);
@@ -1622,10 +1697,12 @@ function updateTripPanel(force) {
   const now = Date.now(); if (!force && now - lastPanelUpdate < 1000) return; lastPanelUpdate = now;
   const R = T.R, nx = nextStopIdx(R, T.disp);
   const atIdx = R.stopCh.findIndex(c => Math.abs(c - T.disp) <= 20);
+  const showIdx = atIdx >= 0 ? atIdx : nx;
   tripUI.next.textContent = atIdx >= 0 ? 'At ' + stopName(R.codes[atIdx]) : (nx >= 0 ? stopName(R.codes[nx]) : 'End of route');
+  if (showIdx >= 0) tripUI.next.append(h('span', { class: 'code' }, R.codes[showIdx]));
   if (T.alightIdx != null) {
     const left = stopsLeft(T), dist = Math.max(0, R.stopCh[T.alightIdx] - T.disp);
-    tripUI.alight.textContent = '🏁 Alight at ' + stopName(R.codes[T.alightIdx]) + ' (#' + (T.alightIdx + 1) + ')';
+    tripUI.alight.textContent = '🏁 Alight at ' + stopName(R.codes[T.alightIdx]) + ' · ' + R.codes[T.alightIdx] + ' (#' + (T.alightIdx + 1) + ')';
     tripUI.stops.textContent = left;
     tripUI.dist.textContent = fmtDist(dist);
     let mins;
@@ -1645,12 +1722,12 @@ function tripProgress() {
   const name = stopName(R.codes[T.alightIdx]);
   if (left <= ALERT_STOPS && left > 1 && !T.alerts.first) {
     T.alerts.first = true;
-    showAlert(left + ' stops to go', 'Next: ' + stopName(R.codes[ahead]) + ', then your stop: ' + name + '.');
+    showAlert(left + ' stops to go', 'Next: ' + stopName(R.codes[ahead]) + ' (' + R.codes[ahead] + '), then your stop: ' + name + ' (' + R.codes[T.alightIdx] + ').');
     buzz([300, 150, 300]); beep(2);
   }
   if (left === 1 && !T.alerts.next) {
     T.alerts.first = T.alerts.next = true;
-    showAlert('Your stop is next!', 'Press the bell now – alight at ' + name + '.', true);
+    showAlert('Your stop is next!', 'Press the bell now – alight at ' + name + ' (' + R.codes[T.alightIdx] + ').', true);
     buzz([600, 200, 600, 200, 600]); beep(4);
   }
   const ac = R.stopCh[T.alightIdx];
@@ -1684,7 +1761,7 @@ function onArrived() {
   const code = T.R.codes[T.alightIdx], fromNo = T.no;
   buzz([200, 100, 200]); beep(2);
   $('alertBox').hidden = true;
-  enterMode('arrived', '📍 ' + stopName(code));
+  enterMode('arrived', '📍 ' + stopName(code) + ' · ' + code);
   setPoll(null); clearRoute();
   const here = stopLL(code);
   const nearby = Object.entries(state.stops)
@@ -1730,7 +1807,7 @@ function renderConnect(data) {
     }
   }
   setPanelKeyed('connect:' + A.code,
-    panelHead('You have arrived', null, A.fromNo),
+    panelHead('You have arrived', null, A.fromNo, () => pollConnect()),
     h('div', { class: 'sub' }, stopName(A.code) + ' (' + A.code + ')'),
     h('div', { class: 'big', style: 'font-size:18px' }, 'Connecting bus? Pick the service you are taking next.'),
     data && data.error ? (data.silent ? quietNote() : h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + data.error + '. Tap ⚙ → Test.')) : null,
@@ -1760,8 +1837,8 @@ function renderWaitPanel() {
   const W = state.wait; if (!W) return;
   waitUI = { count: h('div', { class: 'big' }, 'Checking…'), info: h('div', { class: 'sub' }), then: h('div', { class: 'sub' }), upd: h('div', { class: 'status' }) };
   setPanelKeyed('wait:' + W.no + ':' + W.code,
-    panelHead('Bus ' + W.no + ' → ' + W.R.dest, null, W.no),
-    h('div', { class: 'sub' }, 'Waiting at ' + stopName(W.code) + ' (#' + (W.idx + 1) + ')'),
+    panelHead('Bus ' + W.no + ' → ' + W.R.dest, null, W.no, () => pollWaiting()),
+    h('div', { class: 'sub' }, 'Waiting at ' + stopName(W.code) + ' · ' + W.code + ' (#' + (W.idx + 1) + ')'),
     waitUI.count, waitUI.info, waitUI.then,
     h('div', { class: 'sub' }, W.alightIdx != null ? '🏁 Alighting at ' + stopName(W.R.codes[W.alightIdx]) : 'Alighting stop not chosen yet'),
     h('div', { class: 'row' },
@@ -1771,7 +1848,7 @@ function renderWaitPanel() {
       W.fromArrived ? h('button', { class: 'pill', onclick: backToList }, '‹ Back to list') : null,
       h('label', { class: 'check', style: 'margin:0' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = state.simPref; c.onchange = () => state.simPref = c.checked; return c; })(), 'Simulate ride')),
     waitUI.upd, legend());
-  setPanelSummary(() => { const n = W.next, m = n ? minsUntil(parseEta(n.eta)) : null; return '⏱ Bus ' + W.no + (m == null ? ' · waiting for live time' : m <= 0 ? ' arriving now' : ' in ' + m + ' min') + ' · ' + stopName(W.code); });
+  setPanelSummary(() => { const n = W.next, m = n ? minsUntil(parseEta(n.eta)) : null; return '⏱ Bus ' + W.no + (m == null ? ' · waiting for live time' : m <= 0 ? ' arriving now' : ' in ' + m + ' min') + ' · ' + stopName(W.code) + (stopName(W.code).length <= 16 ? ' ' + W.code : ''); });
   updateWaitPanel();
 }
 function updateWaitPanel() {
@@ -1836,7 +1913,7 @@ function backToList() {
   const W = state.wait; if (!W || !W.fromArrived) return;
   const A = W.fromArrived;
   state.wait = null; setPoll(null); clearRoute();
-  enterMode('arrived', '📍 ' + stopName(A.code));
+  enterMode('arrived', '📍 ' + stopName(A.code) + ' · ' + A.code);
   state.arrived = A;
   map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: stopLL(A.code) }, properties: {} });
   map.easeTo({ center: stopLL(A.code), zoom: 17, duration: 700 });
