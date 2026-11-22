@@ -447,11 +447,18 @@ function polyFeature(ringXY, base, top, color) {
   return { type: 'Feature', properties: { b: base, h: top, c: color }, geometry: { type: 'Polygon', coordinates: [ring] } };
 }
 // Block-style 3D bus made of stacked boxes, front of bus at chainage ch
+const LANE_M = 3;   // buses drive ~3 m left of the road centre line (Singapore drives on the left)
+// Point in the left-hand lane at chainage ch
+function laneXY(R, ch, lane = LANE_M) {
+  const c = xyAt(R, ch), th = headingAt(R, ch, 8);
+  return [c[0] - Math.cos(th) * lane, c[1] + Math.sin(th) * lane];
+}
 function busParts(R, ch, o) {
   const L = o.bendy ? 18 : 12, W = 2.55, hl = L / 2, hw = W / 2;
   const cch = ch - hl + 0.5;
-  const c = xyAt(R, cch), th = headingAt(R, cch, 8);
+  const th = headingAt(R, cch, 8);
   const f = [Math.sin(th), Math.cos(th)], r = [Math.cos(th), -Math.sin(th)];
+  const c = laneXY(R, cch);
   const box = (a0, a1, b0, b1, base, top, color) => polyFeature(
     [[a0, b0], [a1, b0], [a1, b1], [a0, b1]].map(([a, b]) => [c[0] + f[0] * a + r[0] * b, c[1] + f[1] * a + r[1] * b]),
     base, top, color);
@@ -725,7 +732,8 @@ function addLayers() {
     paint: { 'circle-radius': 5, 'circle-color': '#fff', 'circle-stroke-color': '#0b7a75', 'circle-stroke-width': 2 } });
   // Route legs: 'mine' (dark blue), 'other' (other leg of a loop, orange), 'opp' (opposite direction, faint orange).
   // Each line is nudged to its left so both directions show side by side on shared roads.
-  const legOffset = ['interpolate', ['linear'], ['zoom'], 12, -1.5, 15, -3.5, 18, -4.5];
+  // −2.5 px at z17 doubling each zoom level = a constant ~3 m to the left on the ground at street level
+  const legOffset = ['interpolate', ['exponential', 2], ['zoom'], 12, -1.5, 17, -2.5, 22, -80];
   map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
     layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['match', ['get', 'leg'], 'mine', 3, 'other', 2, 1] },
     paint: { 'line-color': '#ffffff', 'line-offset': legOffset, 'line-opacity': ['match', ['get', 'leg'], 'opp', 0.45, 1],
@@ -1204,6 +1212,7 @@ function vehiclesFrom(R, data, now) {
 // Match buses between updates. Buses on one route keep their front-to-back order, so we align
 // the old list with the new one (dynamic programming) instead of matching one by one.
 // Stale GPS (behind the drawn bus) never pulls a bus back: it carries on to its next stop on time.
+const BUS_GAP = 16;   // metres between buses in a lane (12 m bus + 4 m gap)
 function mergeVehicles(fresh) {
   const now = Date.now(), R = state.R;
   const old = state.vehicles.slice().sort((a, b) => a.disp - b.disp);
@@ -1234,9 +1243,18 @@ function mergeVehicles(fresh) {
       if (!o.lostAt) o.lostAt = now;
       if (now - o.lostAt < 60000 && R && o.disp < R.length - 20) kept.push(o);
       i--;
-    } else { const n = nw[j - 1]; n.id = ++state.vid; n.disp = n.ch0; j--; }
+    } else { const n = nw[j - 1]; n.id = ++state.vid; n.disp = n.ch0; n.isNew = true; j--; }
   }
   state.vehicles = fresh.concat(kept);
+  // A bus appearing for the first time is placed behind any bus already at that spot
+  for (const n of state.vehicles.filter(v => v.isNew)) {
+    n.isNew = false;
+    for (let guard = 0; guard < 10; guard++) {
+      const clash = state.vehicles.find(o => o !== n && Math.abs(o.disp - n.disp) < BUS_GAP);
+      if (!clash) break;
+      n.disp = Math.max(0, clash.disp - BUS_GAP);
+    }
+  }
   assignRoles();                                 // colours right away, not on the next frame
 }
 
@@ -1273,13 +1291,22 @@ function frame(ts) {
   const busy = state.touching || (map.isMoving() && !(onboard && state.trip.follow));
   const now = Date.now(), k = 1 - Math.exp(-dt / 0.8);
   const feats = [], pts = [];
-  for (const v of state.vehicles) v.disp = clamp(smoothCh(v.disp, chAt(v.nodes, now), k), 0, R.length);
+  // Move buses front-to-back; a rear bus may not close within one bus length + gap of the bus ahead
+  const order = state.vehicles.slice().sort((a, b) => b.disp - a.disp);
+  let frontCh = Infinity;
+  for (const v of order) {
+    let nd = clamp(smoothCh(v.disp, chAt(v.nodes, now), k), 0, R.length);
+    const limit = frontCh - BUS_GAP;
+    if (nd > limit) nd = Math.max(v.disp, Math.min(nd, limit));   // wait behind – never move back
+    v.disp = nd;
+    frontCh = v.disp;
+  }
   assignRoles();
   for (const v of state.vehicles) {
     if (v.role === 'hidden' || state.mode === 'onboard') continue;
     const c = COLORS[v.role] || COLORS.light;
     feats.push(...busParts(R, v.disp, { color: c.body, roof: c.roof, dd: v.type === 'DD', bendy: v.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: c.body, tcolor: c.text } });
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(laneXY(R, v.disp - 5)) }, properties: { label: R.no, color: c.body, tcolor: c.text } });
   }
   if (state.mode === 'onboard' && state.trip) {
     const T = state.trip;
@@ -1287,7 +1314,7 @@ function frame(ts) {
     if (busy) { tripProgress(); return; }
     const mv = state.vehicles.find(v => v.id === T.myVid);
     feats.push(...busParts(R, T.disp, { color: COLORS.mine.body, roof: COLORS.mine.roof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.mine.body, tcolor: COLORS.mine.text, mine: true } });
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(laneXY(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.mine.body, tcolor: COLORS.mine.text, mine: true } });
     if (T.follow) followCam(now);
     tripProgress();
     if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
