@@ -259,7 +259,12 @@ const DATA_BASES = [
   'https://raw.githubusercontent.com/cheeaun/sgbusdata/main/data/v1/'
 ];
 const COLORS = {
-  bus: '#a3e635', busRoof: '#d9f99d', bus2: '#3f6212', bus2Roof: '#65a30d',   // lime = buses of the service you track
+  // Bus colours: on board = light purple · closest to your tracked/tapped stop = green ·
+  // other buses = red · just browsing (no stop selected) = light red
+  mine: { body: '#c4b5fd', roof: '#ede9fe', text: '#3b0764' },
+  near: { body: '#22c55e', roof: '#bbf7d0', text: '#052e16' },
+  other: { body: '#dc2626', roof: '#f87171', text: '#ffffff' },
+  light: { body: '#f87171', roof: '#fecaca', text: '#450a0a' },
   stop: '#0d2c6c', stopPassed: '#8b9bb4'
 };
 // ======================================================
@@ -430,10 +435,10 @@ function chAt(nodes, t) {
   return nodes[0].ch;
 }
 // Smooth towards target; never creep backwards for small corrections
-// Smooth towards target. Buses never drive backwards: if the estimate falls behind the drawn
-// position the bus waits in place; only a big mismatch (> 400 m) makes it jump.
+// Smooth towards target. Buses never move backwards: if an estimate falls behind the drawn
+// position, the bus simply waits there until the estimate catches up.
 function smoothCh(disp, target, k) {
-  if (target < disp) return disp - target > 400 ? target : disp;
+  if (target < disp) return disp;
   return disp + (target - disp) * k;
 }
 
@@ -739,10 +744,10 @@ function addLayers() {
   map.addLayer({ id: 'buses', type: 'fill-extrusion', source: 'buses',
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'bus-ring', type: 'circle', source: 'bus-pts', filter: ['==', ['get', 'mine'], true],
-    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(163,230,53,0.22)',
-             'circle-stroke-color': '#4d7c0f', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(196,181,253,0.25)',
+             'circle-stroke-color': '#7c3aed', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
   map.addLayer({ id: 'bus-dot', type: 'circle', source: 'bus-pts', maxzoom: 14.5,
-    paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#1a2e05', 'circle-stroke-width': 2 } });
+    paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
   map.addLayer({ id: 'route-stops', type: 'circle', source: 'route-stops',
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, ['match', ['get', 'status'], 'next', 10, 'alight', 11, 'board', 11, 8],
@@ -1192,33 +1197,67 @@ function vehiclesFrom(R, data, now) {
       const chs = (R.idxOf[o.code] || []).map(i => R.stopCh[i]).filter(c => c > r.ch - 20).sort((a, b) => a - b);
       if (chs.length && !isNaN(o.t)) anchors.push({ ch: Math.max(chs[0], r.ch), t: o.t });
     }
-    out.push({ key: g.key, ch0: r.ch, anchors, nodes: buildSchedule(r.ch, now, anchors, R.stopCh), type: g.type, load: g.load, etaByCode, role: 'main', firstEta: obs[0].t });
+    out.push({ key: g.key, ch0: r.ch, anchors, nodes: buildSchedule(r.ch, now, anchors, R.stopCh), type: g.type, load: g.load, etaByCode, role: 'light', firstEta: obs[0].t });
   }
   return out;
 }
+// Match buses between updates. Buses on one route keep their front-to-back order, so we align
+// the old list with the new one (dynamic programming) instead of matching one by one.
+// Stale GPS (behind the drawn bus) never pulls a bus back: it carries on to its next stop on time.
 function mergeVehicles(fresh) {
-  const old = state.vehicles, now = Date.now(), R = state.R;
-  // Score every old/new pair, then match best fits first (keeps close buses from swapping)
-  const pairs = [];
-  for (const n of fresh) for (const o of old) {
-    const gap = n.ch0 - o.disp;                       // + = new data ahead of drawn bus
-    if (gap < -400 || gap > 900) continue;            // too far apart to be the same bus
-    const etaDiff = o.firstEta && n.firstEta ? Math.abs(o.firstEta - n.firstEta) / 1000 : 0;
-    pairs.push({ n, o, cost: Math.abs(gap) + (gap < 0 ? 0.5 * -gap : 0) + 0.5 * Math.min(etaDiff, 300) + (o.key === n.key ? -100 : 0) });
+  const now = Date.now(), R = state.R;
+  const old = state.vehicles.slice().sort((a, b) => a.disp - b.disp);
+  const nw = fresh.slice().sort((a, b) => a.ch0 - b.ch0);
+  const SKIP = 900, cost = (o, n) => {
+    const gap = n.ch0 - o.disp;                 // + = data ahead of drawn bus, − = stale GPS behind it
+    if (gap < -2500 || gap > 1500) return Infinity;
+    return gap < 0 ? 0.25 * -gap : gap;         // stale (behind) readings are expected, so cheap
+  };
+  const I = old.length, J = nw.length, f = [], how = [];
+  for (let i = 0; i <= I; i++) { f.push(new Array(J + 1).fill(Infinity)); how.push(new Array(J + 1).fill(0)); }
+  f[0][0] = 0;
+  for (let i = 0; i <= I; i++) for (let j = 0; j <= J; j++) {
+    if (i && f[i - 1][j] + SKIP < f[i][j]) { f[i][j] = f[i - 1][j] + SKIP; how[i][j] = 1; }          // old bus not in data
+    if (j && f[i][j - 1] + SKIP < f[i][j]) { f[i][j] = f[i][j - 1] + SKIP; how[i][j] = 2; }          // new bus
+    if (i && j) { const c = f[i - 1][j - 1] + cost(old[i - 1], nw[j - 1]); if (c < f[i][j]) { f[i][j] = c; how[i][j] = 3; } }
   }
-  pairs.sort((a, b) => a.cost - b.cost);
-  const usedN = new Set(), usedO = new Set();
-  for (const { n, o } of pairs) {
-    if (usedN.has(n) || usedO.has(o)) continue;
-    usedN.add(n); usedO.add(o);
-    n.id = o.id; n.disp = o.disp;
-    if (o.disp > n.ch0 && o.disp - n.ch0 <= 400 && R) {
-      // LTA's position lags its arrival times: carry on from where the bus is drawn instead of reversing
-      n.nodes = buildSchedule(o.disp, now, n.anchors.filter(a => a.ch > o.disp + 5), R.stopCh);
-    }
+  const kept = [];
+  for (let i = I, j = J; i || j;) {
+    const m = how[i][j];
+    if (m === 3) {
+      const o = old[i - 1], n = nw[j - 1];
+      n.id = o.id; n.disp = o.disp; n.lostAt = 0;
+      if (n.ch0 < o.disp && R) n.nodes = buildSchedule(o.disp, now, n.anchors.filter(a => a.ch > o.disp + 5), R.stopCh);
+      i--; j--;
+    } else if (m === 1) {
+      const o = old[i - 1];                      // missing from this update: keep it moving for up to 60 s
+      if (!o.lostAt) o.lostAt = now;
+      if (now - o.lostAt < 60000 && R && o.disp < R.length - 20) kept.push(o);
+      i--;
+    } else { const n = nw[j - 1]; n.id = ++state.vid; n.disp = n.ch0; j--; }
   }
-  for (const n of fresh) if (!usedN.has(n)) { n.id = ++state.vid; n.disp = n.ch0; }
-  state.vehicles = fresh;
+  state.vehicles = fresh.concat(kept);
+  assignRoles();                                 // colours right away, not on the next frame
+}
+
+// Colour roles, worked out every frame from positions (stable – no reshuffling with LTA's list order)
+function stopChOf(R, code) {
+  const idx = R.idxOf[code]; if (!idx) return null;
+  return R.stopCh[idx.find(i => i < R.codes.length - 1) ?? idx[0]];
+}
+function assignRoles() {
+  const R = state.R; if (!R) return;
+  let target = null, hidePassed = false;
+  if (state.mode === 'waiting' && state.wait) { target = R.stopCh[state.wait.idx]; hidePassed = true; }
+  else if (state.mode === 'browse' && state.sheetStop) target = stopChOf(R, state.sheetStop);
+  if (target == null) { for (const v of state.vehicles) v.role = 'light'; return; }
+  let best = null;
+  for (const v of state.vehicles) {
+    const coming = v.disp <= target + 15;
+    v.role = coming ? 'other' : (hidePassed ? 'hidden' : 'other');
+    if (coming && (!best || v.disp > best.disp)) best = v;
+  }
+  if (best) best.role = 'near';
 }
 
 // ======================= animation loop =======================
@@ -1234,20 +1273,21 @@ function frame(ts) {
   const busy = state.touching || (map.isMoving() && !(onboard && state.trip.follow));
   const now = Date.now(), k = 1 - Math.exp(-dt / 0.8);
   const feats = [], pts = [];
+  for (const v of state.vehicles) v.disp = clamp(smoothCh(v.disp, chAt(v.nodes, now), k), 0, R.length);
+  assignRoles();
   for (const v of state.vehicles) {
-    v.disp = clamp(smoothCh(v.disp, chAt(v.nodes, now), k), 0, R.length);
     if (v.role === 'hidden' || state.mode === 'onboard') continue;
-    const second = v.role === 'second';
-    feats.push(...busParts(R, v.disp, { color: second ? COLORS.bus2 : COLORS.bus, roof: second ? COLORS.bus2Roof : COLORS.busRoof, dd: v.type === 'DD', bendy: v.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: second ? COLORS.bus2 : COLORS.bus, tcolor: second ? '#ffffff' : '#1a2e05' } });
+    const c = COLORS[v.role] || COLORS.light;
+    feats.push(...busParts(R, v.disp, { color: c.body, roof: c.roof, dd: v.type === 'DD', bendy: v.type === 'BD' }));
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, v.disp - 5)) }, properties: { label: R.no, color: c.body, tcolor: c.text } });
   }
   if (state.mode === 'onboard' && state.trip) {
     const T = state.trip;
     updateOwnBus(now, k);
     if (busy) { tripProgress(); return; }
     const mv = state.vehicles.find(v => v.id === T.myVid);
-    feats.push(...busParts(R, T.disp, { color: COLORS.bus, roof: COLORS.busRoof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.bus, tcolor: '#1a2e05', mine: true } });
+    feats.push(...busParts(R, T.disp, { color: COLORS.mine.body, roof: COLORS.mine.roof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(xyAt(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.mine.body, tcolor: COLORS.mine.text, mine: true } });
     if (T.follow) followCam(now);
     tripProgress();
     if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
@@ -1636,7 +1676,7 @@ async function pollOnboard() {
   try {
     const data = await fetchServiceData(R, idxs);
     if (token !== state.pollToken || state.trip !== T) return;
-    mergeVehicles(vehiclesFrom(R, data, Date.now()).map(v => (v.role = 'hidden', v)));
+    mergeVehicles(vehiclesFrom(R, data, Date.now()));
     let best = null, bd = 250;
     for (const v of state.vehicles) { const d = Math.abs(v.disp - T.disp); if (d < bd) { bd = d; best = v; } }
     T.myVid = best ? best.id : null;
@@ -1885,7 +1925,7 @@ function updateWaitPanel() {
     const m = minsUntil(parseEta(n.eta));
     waitUI.count.textContent = m == null ? 'No live time for bus ' + W.no : m <= 0 ? 'Bus ' + W.no + ' arriving now' : 'Next bus in ' + m + ' min';
     waitUI.info.textContent = [LOAD_TXT[n.load], TYPE_TXT[n.type], n.feature === 'WAB' ? '♿ Wheelchair accessible' : '', n.lat ? '' : '(position not available)'].filter(Boolean).join(' · ');
-    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(parseEta(a.eta))) + ' (dark green bus) · ' + (LOAD_TXT[a.load] || '') : '';
+    waitUI.then.textContent = a ? 'Then: ' + fmtMins(minsUntil(parseEta(a.eta))) + ' (red bus) · ' + (LOAD_TXT[a.load] || '') : '';
   }
   waitUI.upd.textContent = 'Updated ' + hhmm();
 }
@@ -1901,11 +1941,9 @@ async function pollWaiting() {
     mergeVehicles(vehiclesFrom(R, data, now));
     const atS = ((data.stops || {})[W.code] || []).filter(o => o.eta).sort((x, y) => (parseEta(x.eta) || Infinity) - (parseEta(y.eta) || Infinity));
     W.next = atS[0] || null; W.after = atS[1] || null; W.loaded = true;
-    const keyOf = o => o && o.lat ? o.lat.toFixed(5) + ',' + o.lng.toFixed(5) : null;
-    const k1 = keyOf(W.next), k2 = keyOf(W.after);
-    for (const v of state.vehicles) v.role = v.key === k1 ? 'main' : v.key === k2 ? 'second' : 'hidden';
     updateWaitPanel();
-    const mv = state.vehicles.find(v => v.role === 'main');
+    assignRoles();
+    const mv = state.vehicles.find(v => v.role === 'near');
     if (mv && !W.fitted && !state.userMoved) {
       W.fitted = true;
       const b = new maplibregl.LngLatBounds(); b.extend(stopLL(W.code)); b.extend(toLL(xyAt(R, mv.disp)));
