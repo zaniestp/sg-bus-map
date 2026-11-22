@@ -213,6 +213,8 @@
     <h2>Live data proxy</h2>
     <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
     <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
+    <h2 style="margin-top:14px">Access code</h2>
+    <input id="codeInput" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Enter access code">
     <div id="testResult"></div>
     <h2 style="margin-top:14px">Theme</h2>
     <select id="themeSel" class="field">
@@ -627,13 +629,18 @@ const emptyFC = () => ({ type: 'FeatureCollection', features: [] });
 const params = new URLSearchParams(location.search);
 if (params.get('api')) store.set('busApi', params.get('api'));
 let API = (store.get('busApi') || DEFAULT_API || '').replace(/\/+$/, '');
+// Access code (⚙ settings) is sent as a header. A refused code is handled quietly:
+// the app just shows "Live times not available" and carries on.
+function apiHeaders() { const c = store.get('accessCode'); return c ? { 'X-App-Key': c } : {}; }
 async function api(path) {
   if (!API) throw new Error('No proxy set (⚙)');
-  const r = await fetch(API + path);
+  const r = await fetch(API + path, { headers: apiHeaders() });
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { const e = new Error('Live times not available'); e.silent = true; throw e; }
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
   return data;
 }
+const quietNote = () => h('div', { class: 'note' }, 'Live times not available');
 async function loadData(name) {
   let lastErr;
   for (const base of DATA_BASES) {
@@ -1198,7 +1205,7 @@ async function pollBrowse() {
     const c = state.vehicles.length;
     $('liveStatus').textContent = c ? `🟢 ${c} bus${c > 1 ? 'es' : ''} live · ${hhmm()}` : `No live buses this direction · ${hhmm()}`;
   } catch (e) {
-    if (token === state.pollToken) $('liveStatus').innerHTML = '', $('liveStatus').append(h('span', { style: 'color:#b71c1c' }, '⚠ Live buses unavailable: ' + e.message));
+    if (token === state.pollToken) { $('liveStatus').innerHTML = ''; $('liveStatus').append(e.silent ? 'Live times not available' : h('span', { style: 'color:#b71c1c' }, '⚠ Live buses unavailable: ' + e.message)); }
   }
 }
 function clearService() {
@@ -1391,7 +1398,9 @@ async function loadArrivals(code) {
   } catch (e) {
     if (state.sheetStop !== code || !$('arrivals')) return;
     box.innerHTML = '';
-    box.append(h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + e.message + '. Tap ⚙ → Test to check the proxy.'));
+    box.append(e.silent ? quietNote() : h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + e.message + '. Tap ⚙ → Test to check the proxy.'));
+    if (e.silent && $('selSvc')) $('selSvc').remove();
+    state.stopFirst = null;
     for (const no of all) box.append(h('div', { class: 'arr off' }, h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no), h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no].name))));
   }
 }
@@ -1694,7 +1703,7 @@ async function pollConnect() {
     const data = await api('/multi-arrival?stops=' + A.nearby.map(x => x.code).join(','));
     if (token !== state.pollToken || state.arrived !== A) return;
     renderConnect(data);
-  } catch (e) { if (state.arrived === A) renderConnect({ error: e.message }); }
+  } catch (e) { if (state.arrived === A) renderConnect({ error: e.message, silent: e.silent }); }
 }
 function renderConnect(data) {
   const A = state.arrived; if (!A) return;
@@ -1724,7 +1733,7 @@ function renderConnect(data) {
     panelHead('You have arrived', null, A.fromNo),
     h('div', { class: 'sub' }, stopName(A.code) + ' (' + A.code + ')'),
     h('div', { class: 'big', style: 'font-size:18px' }, 'Connecting bus? Pick the service you are taking next.'),
-    data && data.error ? h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + data.error + '. Tap ⚙ → Test.') : null,
+    data && data.error ? (data.silent ? quietNote() : h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + data.error + '. Tap ⚙ → Test.')) : null,
     groups.length ? groups : h('div', { class: 'note' }, 'No services found nearby.'),
     legend(),
     h('div', { class: 'row' }, h('button', { class: 'pill', onclick: resetAll }, 'No thanks – finish'),
@@ -1800,7 +1809,13 @@ async function pollWaiting() {
       const b = new maplibregl.LngLatBounds(); b.extend(stopLL(W.code)); b.extend(toLL(xyAt(R, mv.disp)));
       map.fitBounds(b, { padding: { top: 140, bottom: $('panel').offsetHeight + 40, left: 60, right: 60 }, maxZoom: 16.5, duration: 900 });
     }
-  } catch (e) { if (waitUI) { waitUI.loaded = false; waitUI.count.textContent = 'Live data unavailable'; waitUI.info.textContent = '⚠ ' + e.message + ' – tap ⚙ → Test'; waitUI.info.style.color = '#b71c1c'; } }
+  } catch (e) {
+    if (!waitUI) return;
+    waitUI.loaded = false;
+    waitUI.count.textContent = e.silent ? 'Live times not available' : 'Live data unavailable';
+    waitUI.info.textContent = e.silent ? '' : '⚠ ' + e.message + ' – tap ⚙ → Test';
+    waitUI.info.style.color = e.silent ? '' : '#b71c1c';
+  }
 }
 // Auto-switch to on-board once your GPS moves along the route past the boarding stop
 function waitOnFix(ll, acc, t) {
@@ -1847,14 +1862,15 @@ function resetAll() {
   toast('Restarted');
 }
 
-$('settingsBtn').onclick = () => { $('apiInput').value = API; $('themeSel').value = themeChoice(); $('testResult').textContent = ''; $('settings').hidden = false; };
+$('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('testResult').textContent = ''; $('settings').hidden = false; };
 $('themeSel').onchange = () => { store.set('theme', $('themeSel').value); refreshTheme(true); };
 $('cancelBtn').onclick = () => $('settings').hidden = true;
 $('saveBtn').onclick = () => {
   API = $('apiInput').value.trim().replace(/\/+$/, '');
   store.set('busApi', API);
+  store.set('accessCode', $('codeInput').value.trim());
   $('settings').hidden = true;
-  toast(API ? 'Proxy saved' : 'Proxy cleared');
+  toast('Settings saved');
   if (state.pollFn) state.pollFn();
 };
 $('testBtn').onclick = async () => {
@@ -1862,14 +1878,16 @@ $('testBtn').onclick = async () => {
   if (!url) { out.textContent = 'Enter a URL first.'; return; }
   out.style.color = ''; out.textContent = 'Testing…';
   try {
-    const r = await fetch(url + '/multi-arrival?stops=83139');
-    const d = await r.json();
+    const code = $('codeInput').value.trim();
+    const r = await fetch(url + '/multi-arrival?stops=83139', { headers: code ? { 'X-App-Key': code } : {} });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401) throw new Error('Live times not available');
     if (!r.ok) throw new Error(d.error || r.status);
     out.style.color = '#0a8a3a';
     out.textContent = '✓ Working (v2) – ' + ((d.stops || {})['83139'] || []).length + ' services at test stop 83139';
   } catch (e) {
     out.style.color = '#c62828';
-    out.textContent = '✗ ' + e.message + ' – is the Worker updated to v2?';
+    out.textContent = '✗ ' + e.message;
   }
 };
 </script>
