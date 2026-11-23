@@ -664,7 +664,7 @@ function ringDist(p, ring) { let m = Infinity; for (let i = 1; i < ring.length; 
 // buildings: [{ ring:[[x,y]..] (metres), h, b, outline }] (outline = invisible footprint that groups parts),
 // landuse: [{ cls, ring }], pois: [{ x, y, cls, sub }]
 // returns per building the parts to draw: [{ b, h, cat }] ([] for outlines)
-function classifyBuildings(buildings, landuse, pois) {
+function classifyBuildings(buildings, landuse, pois, grounds = []) {
   const cell = 60, grid = new Map(), gk = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
   for (const q of pois) { const k = gk(q.x, q.y); (grid.get(k) || grid.set(k, []).get(k)).push(q); }
   const lus = landuse.map(l => ({ ...l, box: ringBox(l.ring) }));
@@ -691,8 +691,18 @@ function classifyBuildings(buildings, landuse, pois) {
       else if (l.cls === 'residential' && !nearRes && c[0] >= l.box[0] - 40 && c[0] <= l.box[2] + 40 && c[1] >= l.box[1] - 40 && c[1] <= l.box[3] + 40)
         nearRes = ringDist(c, l.ring) <= 40;                    // residential area just short of the block
     }
-    return { box, c, food, shop, mall, school, lu, nearRes };
+    // nearest school marker within 150 m
+    let schoolDist = Infinity;
+    for (let gx = Math.floor((c[0] - 150) / cell); gx <= Math.floor((c[0] + 150) / cell); gx++)
+      for (let gy = Math.floor((c[1] - 150) / cell); gy <= Math.floor((c[1] + 150) / cell); gy++)
+        for (const q of grid.get(gx + ',' + gy) || [])
+          if (SCHOOL_CLASSES.has(q.cls) || SCHOOL_CLASSES.has(q.sub)) schoolDist = Math.min(schoolDist, Math.hypot(q.x - c[0], q.y - c[1]));
+    return { box, c, food, shop, mall, school, lu, nearRes, schoolDist };
   });
+  // grass / field / park areas that contain a school marker = school grounds
+  const schoolPois = pois.filter(q => SCHOOL_CLASSES.has(q.cls) || SCHOOL_CLASSES.has(q.sub));
+  const schoolGrounds = grounds.map(g => ({ ring: g.ring, box: ringBox(g.ring) }))
+    .filter(g => schoolPois.some(q => q.x >= g.box[0] && q.x <= g.box[2] && q.y >= g.box[1] && q.y <= g.box[3] && inRing([q.x, q.y], g.ring)));
 
   // 2) group touching/overlapping pieces (and parts inside an outline) into complexes
   const parent = buildings.map((_, i) => i);
@@ -720,21 +730,30 @@ function classifyBuildings(buildings, landuse, pois) {
     t.retail = t.retail || f.lu === 'retail'; t.schoolLu = t.schoolLu || isSchoolLu(f.lu);
   });
 
-  // 3) colour each visible piece
+  // 3) colour each visible piece (each result also carries a short "why" for the long-press check)
   return buildings.map((bd, i) => {
     if (bd.outline) return [];
     const f = info[i], t = cx.get(find(i)), h = bd.h, b = bd.b || 0;
     const band = (low, high) => h > 8 ? [{ b, h: Math.min(b + 4, h), cat: low }, { b: Math.min(b + 4, h), h, cat: high }] : [{ b, h, cat: low }];
-    if (isSchoolLu(f.lu) || f.school || t.school || t.schoolLu) return [{ b, h, cat: 'school' }];
-    if (t.mall || t.retail || t.shop >= 3) return [{ b, h, cat: 'shop' }];          // whole shopping centre
     const lu = f.lu || (f.nearRes ? 'residential' : null);
-    if (lu === 'residential') return f.food ? band('food', 'residential') : f.shop ? band('shop', 'residential') : [{ b, h, cat: 'residential' }];
-    if (lu === 'commercial') return f.food ? band('food', 'commercial') : f.shop ? band('shop', 'commercial') : [{ b, h, cat: 'commercial' }];
-    if (f.food && f.food >= f.shop) return [{ b, h, cat: 'food' }];
-    if (f.shop) return [{ b, h, cat: 'shop' }];
+    const inGrounds = schoolGrounds.some(g => f.c[0] >= g.box[0] && f.c[0] <= g.box[2] && f.c[1] >= g.box[1] && f.c[1] <= g.box[3] && inRing(f.c, g.ring));
+    const why = [Math.round(h) + ' m tall', 'area: ' + (f.lu || (f.nearRes ? 'residential nearby' : 'none')),
+                 'inside: ' + f.food + ' food, ' + f.shop + ' shops' + (f.school ? ', school' : ''),
+                 'school marker ' + (isFinite(f.schoolDist) ? Math.round(f.schoolDist) + ' m away' : 'none nearby') + (inGrounds ? ' (school grounds)' : '')].join(' · ');
+    const out = (parts, rule) => { parts.why = why + ' → ' + rule; return parts; };
+    if (isSchoolLu(f.lu) || f.school || t.school || t.schoolLu) return out([{ b, h, cat: 'school' }], 'School');
+    if (t.mall || t.retail || t.shop >= 3) return out([{ b, h, cat: 'shop' }], 'Shopping centre');
+    if (inGrounds && !f.food && !f.shop) return out([{ b, h, cat: 'school' }], 'School (in school grounds)');
+    // campus blocks around a field: low-rise, no shops/food, school marker close by, not in a housing/commercial area
+    if (f.schoolDist <= 150 && h < 25 && !f.food && !f.shop && !['residential', 'commercial', 'retail'].includes(f.lu))
+      return out([{ b, h, cat: 'school' }], 'School (school marker nearby)');
+    if (lu === 'residential') return out(f.food ? band('food', 'residential') : f.shop ? band('shop', 'residential') : [{ b, h, cat: 'residential' }], 'Residential' + (f.food || f.shop ? ' with shops below' : ''));
+    if (lu === 'commercial') return out(f.food ? band('food', 'commercial') : f.shop ? band('shop', 'commercial') : [{ b, h, cat: 'commercial' }], 'Commercial');
+    if (f.food && f.food >= f.shop) return out([{ b, h, cat: 'food' }], 'Food');
+    if (f.shop) return out([{ b, h, cat: 'shop' }], 'Shops');
     // tall-block rule: 7+ storeys with no shops/food outside commercial/industrial areas → almost always HDB/condo
-    if (h >= 20 && lu !== 'industrial') return [{ b, h, cat: 'residential' }];
-    return [{ b, h, cat: 'other' }];
+    if (h >= 20 && lu !== 'industrial') return out([{ b, h, cat: 'residential' }], 'Residential (tall-block rule)');
+    return out([{ b, h, cat: 'other' }], 'Unknown use');
   });
 }
 // NEA forecast text → weather effect
@@ -982,6 +1001,13 @@ function setupBuildingColors() {
   map.addLayer({ id: 'bldg-color', type: 'fill-extrusion', source: 'bldg-color', minzoom: 16,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 0.95 } },
     map.getLayer('route-casing') ? 'route-casing' : undefined);
+  // Building numbers: "Blk 524A" on homes, plain numbers elsewhere; homes win when labels would overlap
+  map.addSource('bldg-labels', { type: 'geojson', data: emptyFC() });
+  map.addLayer({ id: 'bldg-labels', type: 'symbol', source: 'bldg-labels', minzoom: 16.5,
+    layout: { 'text-field': ['get', 'text'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 16.5, 13, 19, 16],
+              'symbol-sort-key': ['get', 'prio'], 'text-padding': 4, 'text-allow-overlap': false },
+    paint: { 'text-color': ['get', 'tc'], 'text-halo-color': ['get', 'halo'], 'text-halo-width': 2.4 } });
+  BLDG.numberLayers = map.getStyle().layers.filter(l => l['source-layer'] === 'housenumber').map(l => l.id);
   map.on('moveend', scheduleBldg);
   map.on('sourcedata', e => { if (e.sourceId === 'openmaptiles' && e.isSourceLoaded) scheduleBldg(); });
   map.on('zoom', updateBldgLegend);
@@ -1014,10 +1040,46 @@ function applyBldgMode() {
     try { map.setPaintProperty(l.id, 'fill-extrusion-opacity', hideOriginal ? ['step', ['zoom'], l.opacity, 16, 0] : (l.origOpacity ?? 1)); } catch {}
   }
   setLayerVisible('bldg-color', BLDG.on);
+  setLayerVisible('bldg-labels', BLDG.on);
+  for (const id of BLDG.numberLayers || []) setLayerVisible(id, !BLDG.on);   // avoid showing numbers twice
   applyBldgPaint();
-  if (BLDG.on) scheduleBldg(); else map.getSource('bldg-color').setData(emptyFC());
+  if (BLDG.on) scheduleBldg(); else { map.getSource('bldg-color').setData(emptyFC()); map.getSource('bldg-labels').setData(emptyFC()); }
   updateBldgLegend();
 }
+// Long-press (or right-click) a building: show what the app found and why it chose the colour
+function inspectBuilding(point) {
+  if (!BLDG.on || !BLDG.info || map.getZoom() < 15.8) return false;
+  const ids = BLDG.layers.map(l => l.id).filter(id => map.getLayer(id)).concat(map.getLayer('bldg-color') ? ['bldg-color'] : []);
+  let feats = [];
+  try { feats = map.queryRenderedFeatures([[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]], { layers: ids }); } catch {}
+  const { list, parts } = BLDG.info;
+  let idx = -1;
+  for (const f of feats) {
+    if (f.id != null) idx = list.findIndex(x => !x.outline && x.f.id === f.id);
+    if (idx < 0) { const ring = outerRings(f.geometry)[0]; if (ring) { const q = toXY(ring[0]); idx = list.findIndex(x => !x.outline && inRing(q, inflateRing(x.xy, 1))); } }
+    if (idx >= 0) break;
+  }
+  if (idx < 0) { const q = toXY(map.unproject(point).toArray()); idx = list.findIndex(x => !x.outline && inRing(q, x.xy)); }
+  if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
+  toast('🏢 ' + parts[idx].why, 7000);
+  return true;
+}
+(() => {
+  let timer = null, start = null;
+  const cont = () => map.getCanvasContainer();
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  map.on('load', () => {
+    cont().addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return cancel();
+      const r = cont().getBoundingClientRect(), t = e.touches[0];
+      start = { x: t.clientX - r.left, y: t.clientY - r.top };
+      timer = setTimeout(() => { timer = null; if (inspectBuilding(start) && navigator.vibrate) navigator.vibrate(30); }, 650);
+    }, { passive: true });
+    cont().addEventListener('touchmove', e => { const r = cont().getBoundingClientRect(), t = e.touches[0]; if (start && Math.hypot(t.clientX - r.left - start.x, t.clientY - r.top - start.y) > 10) cancel(); }, { passive: true });
+    cont().addEventListener('touchend', cancel, { passive: true });
+  });
+  map.on('contextmenu', e => { inspectBuilding(e.point); });
+})();
 function updateBldgLegend() { $('bldgLegend').hidden = !(BLDG.on && BLDG.ready && map.getZoom() >= 16); }
 function scheduleBldg() { if (!BLDG.on || !BLDG.ready) return; clearTimeout(BLDG.timer); BLDG.timer = setTimeout(computeBldg, 350); }
 function tileFeatures(sl) {
@@ -1066,8 +1128,18 @@ function computeBldg() {
   const blds = list.map(({ f, xy, outline }) => ({ ring: xy, outline, h: +(f.properties.render_height ?? f.properties.height ?? 10), b: +(f.properties.render_min_height ?? f.properties.min_height ?? 0) }));
   const landuse = [];
   for (const f of tileFeatures('landuse')) for (const r of outerRings(f.geometry)) landuse.push({ cls: f.properties.class, ring: r.map(toXY) });
-  const pois = tileFeatures('poi').filter(f => f.geometry && f.geometry.type === 'Point').map(f => { const q = toXY(f.geometry.coordinates); return { x: q[0], y: q[1], cls: f.properties.class, sub: f.properties.subclass }; });
-  const parts = classifyBuildings(blds, landuse, pois);
+  // the same shop/eatery can appear once per map tile near tile edges – count it once
+  const poiSeen = new Set(), pois = [];
+  for (const f of tileFeatures('poi')) {
+    if (!f.geometry || f.geometry.type !== 'Point') continue;
+    const q = toXY(f.geometry.coordinates), k = Math.round(q[0]) + ',' + Math.round(q[1]) + ',' + f.properties.class + ',' + (f.properties.name || '');
+    if (poiSeen.has(k)) continue; poiSeen.add(k);
+    pois.push({ x: q[0], y: q[1], cls: f.properties.class, sub: f.properties.subclass });
+  }
+  const grounds = [];
+  for (const sl of ['landcover', 'park', 'landuse']) for (const f of tileFeatures(sl)) for (const r of outerRings(f.geometry)) grounds.push({ ring: r.map(toXY) });
+  const parts = classifyBuildings(blds, landuse, pois, grounds);
+  BLDG.info = { list, parts };                       // for the long-press "what is this building?" check
   const feats = [], cats = {}, src = map.getSource('openmaptiles'), gj = src.type === 'geojson';
   const props = (cat, b, h) => { const c = BLDG_COLORS[cat]; return { b, h, cat, c, cm: themeColor(c, 'morning', 'ext'), cn: themeColor(c, 'night', 'ext') }; };
   parts.forEach((ps, i) => {
@@ -1091,7 +1163,31 @@ function computeBldg() {
     }
   });
   map.getSource('bldg-color').setData({ type: 'FeatureCollection', features: feats });
-  state.bldgStats = { method: BLDG.useState ? 'feature-state' : 'copies', buildings: blds.length, ms: Math.round(performance.now() - t0), cats };
+  // ---- building numbers: each address point labels the building it sits in
+  const night = state.theme === 'night', cell2 = 60, bgrid = new Map();
+  list.forEach(({ xy, outline }, i) => {
+    if (outline || !parts[i].length) return;
+    const bx = ringBox(xy);
+    for (let gx = Math.floor(bx[0] / cell2); gx <= Math.floor(bx[2] / cell2); gx++)
+      for (let gy = Math.floor(bx[1] / cell2); gy <= Math.floor(bx[3] / cell2); gy++) { const k = gx + ',' + gy; (bgrid.get(k) || bgrid.set(k, []).get(k)).push(i); }
+  });
+  const labels = [], used = new Set();
+  for (const f of tileFeatures('housenumber')) {
+    const hn = f.properties.housenumber; if (!hn || !f.geometry || f.geometry.type !== 'Point') continue;
+    const q = toXY(f.geometry.coordinates);
+    const i = (bgrid.get(Math.floor(q[0] / cell2) + ',' + Math.floor(q[1] / cell2)) || []).find(j => inRing(q, list[j].xy));
+    if (i == null) continue;
+    const cat = parts[i][parts[i].length - 1].cat, key = i + '|' + hn;
+    if (used.has(key)) continue; used.add(key);
+    // text in a darker shade of the building's colour on a white outline (night: light text, dark outline)
+    const dark = { residential: '#0d2c6c', food: '#9b1c1c', shop: '#9a4b00', commercial: '#4c1d95', school: '#9d174d', other: '#374151' }[cat] || '#374151';
+    const lightTxt = { residential: '#bfdbfe', food: '#fecaca', shop: '#fed7aa', commercial: '#ddd6fe', school: '#fbcfe8', other: '#e5e7eb' }[cat] || '#e5e7eb';
+    labels.push({ type: 'Feature', geometry: f.geometry, properties: {
+      text: cat === 'residential' ? 'Blk ' + hn : String(hn), cat, prio: cat === 'residential' ? 0 : 1,
+      tc: night ? lightTxt : dark, halo: night ? '#0b1220' : '#ffffff' } });
+  }
+  map.getSource('bldg-labels').setData({ type: 'FeatureCollection', features: labels });
+  state.bldgStats = { method: BLDG.useState ? 'feature-state' : 'copies', buildings: blds.length, labels: labels.length, ms: Math.round(performance.now() - t0), cats };
   updateBldgLegend();
 }
 
@@ -1239,6 +1335,7 @@ function applyTheme(t) {
   const night = t === 'night', key = t === 'morning' ? 'cm' : night ? 'cn' : 'c';
   for (const id of ['trees', 'shelters', 'bldg-color']) if (map.getLayer(id)) map.setPaintProperty(id, 'fill-extrusion-color', ['coalesce', ['get', key], ['get', 'c']]);
   if (typeof applyBldgPaint === 'function') applyBldgPaint();
+  if (map.getLayer('bldg-labels') && typeof scheduleBldg === 'function') scheduleBldg();   // labels re-made in the new theme colours
   map.setPaintProperty('route-casing', 'line-color', night ? '#0b1220' : t === 'morning' ? '#fff6d6' : '#ffffff');
   map.setPaintProperty('route-line', 'line-color', ['match', ['get', 'leg'], 'mine', night ? '#7c93ff' : '#1e3a8a', '#ff9100']);
   map.setPaintProperty('route-stops-name', 'text-color', night ? '#a9c6ff' : COLORS.stop);
