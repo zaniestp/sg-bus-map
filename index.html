@@ -172,6 +172,9 @@
   .btn.red { background: var(--red); color: #fff; }
   #testResult { font-size: 13px; margin-top: 8px; min-height: 18px; }
 
+  #stopCard { position: fixed; top: calc(66px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 8; background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px 12px; max-height: 48vh; overflow-y: auto; }
+  #stopCard .mine { background: #eef2ff; border-radius: 10px; padding: 8px 10px; margin: 6px 0; font-size: 14px; font-weight: 600; color: var(--blue); }
+  body[data-theme="night"] #stopCard .mine { background: #1d2740; color: #a9c6ff; }
   #toast { position: fixed; left: 50%; top: calc(70px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 50; background: #222; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; }
   #toast.show { opacity: .95; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 60; background: rgba(255,255,255,.85); font-size: 16px; padding: 20px; text-align: center; }
@@ -219,6 +222,7 @@
 </div>
 
 <div id="panel" hidden></div>
+<div id="stopCard" hidden></div>
 
 <div id="alertBox" hidden>
   <h2 id="alertTitle"></h2>
@@ -979,9 +983,12 @@ function addLayers() {
     state.userMoved = true;
     if (state.mode === 'onboard' && state.trip && state.trip.follow) { state.trip.follow = false; $('followBtn').hidden = false; }
   };
-  cont.addEventListener('pointerdown', () => { state.touching = true; userTouch(); }, { passive: true });
-  cont.addEventListener('touchstart', () => { state.touching = true; userTouch(); }, { passive: true });
+  // While a finger is down the camera pauses (so gestures can start); following only stops on a real
+  // drag / pinch / rotate, so tapping a stop keeps the camera on your bus.
+  cont.addEventListener('pointerdown', () => { state.touching = true; }, { passive: true });
+  cont.addEventListener('touchstart', () => { state.touching = true; }, { passive: true });
   cont.addEventListener('wheel', userTouch, { passive: true });
+  for (const ev of ['dragstart', 'zoomstart', 'rotatestart', 'pitchstart']) map.on(ev, e => { if (e.originalEvent) userTouch(); });
   const release = () => { state.touching = false; };
   for (const ev of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) window.addEventListener(ev, release, { passive: true });
 }
@@ -1061,7 +1068,8 @@ function inspectBuilding(point) {
   }
   if (idx < 0) { const q = toXY(map.unproject(point).toArray()); idx = list.findIndex(x => !x.outline && inRing(q, x.xy)); }
   if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
-  toast('🏢 ' + parts[idx].why, 7000);
+  const ad = BLDG.info.addr && BLDG.info.addr[idx];
+  toast('🏢 ' + parts[idx].why + ' · ' + (ad ? 'address: ' + [...ad].join(', ') : 'no address number'), 7000);
   return true;
 }
 (() => {
@@ -1139,7 +1147,7 @@ function computeBldg() {
   const grounds = [];
   for (const sl of ['landcover', 'park', 'landuse']) for (const f of tileFeatures(sl)) for (const r of outerRings(f.geometry)) grounds.push({ ring: r.map(toXY) });
   const parts = classifyBuildings(blds, landuse, pois, grounds);
-  BLDG.info = { list, parts };                       // for the long-press "what is this building?" check
+  BLDG.info = { list, parts, addr: {} };                       // for the long-press "what is this building?" check
   const feats = [], cats = {}, src = map.getSource('openmaptiles'), gj = src.type === 'geojson';
   const props = (cat, b, h) => { const c = BLDG_COLORS[cat]; return { b, h, cat, c, cm: themeColor(c, 'morning', 'ext'), cn: themeColor(c, 'night', 'ext') }; };
   parts.forEach((ps, i) => {
@@ -1175,8 +1183,15 @@ function computeBldg() {
   for (const f of tileFeatures('housenumber')) {
     const hn = f.properties.housenumber; if (!hn || !f.geometry || f.geometry.type !== 'Point') continue;
     const q = toXY(f.geometry.coordinates);
-    const i = (bgrid.get(Math.floor(q[0] / cell2) + ',' + Math.floor(q[1] / cell2)) || []).find(j => inRing(q, list[j].xy));
+    let i = (bgrid.get(Math.floor(q[0] / cell2) + ',' + Math.floor(q[1] / cell2)) || []).find(j => inRing(q, list[j].xy));
+    if (i == null) {          // L-shaped / curved blocks: the address point can sit just outside the outline
+      let bd = 15;
+      for (let gx = Math.floor((q[0] - 15) / cell2); gx <= Math.floor((q[0] + 15) / cell2); gx++)
+        for (let gy = Math.floor((q[1] - 15) / cell2); gy <= Math.floor((q[1] + 15) / cell2); gy++)
+          for (const j of bgrid.get(gx + ',' + gy) || []) { const d = ringDist(q, list[j].xy); if (d < bd) { bd = d; i = j; } }
+    }
     if (i == null) continue;
+    (BLDG.info.addr[i] ||= new Set()).add(String(hn));
     const cat = parts[i][parts[i].length - 1].cat, key = i + '|' + hn;
     if (used.has(key)) continue; used.add(key);
     // text in a darker shade of the building's colour on a white outline (night: light text, dark outline)
@@ -1646,20 +1661,84 @@ function updateStops(force) {
 // ======================= map taps =======================
 function onMapClick(e) {
   const p = e.point, pad = 14;
-  const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops'];
+  const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops', 'opp-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
   if (!feats.length) return;
   const f = feats[0].properties;
   if (state.mode === 'browse') return openStop(f.code);
-  if (state.mode === 'onboard' && state.trip) {
-    const T = state.trip;
-    if (f.idx != null && T.R.stopCh[f.idx] > T.disp + 20) { setAlight(f.idx); toast('Alight stop: ' + stopName(f.code)); }
-    else toast(stopName(f.code));
-  } else if (state.mode === 'waiting' && state.wait) {
-    if (f.idx > state.wait.idx) { state.wait.alightIdx = f.idx; updateStops(true); renderWaitPanel(); toast('Alight stop: ' + stopName(f.code)); }
-    else toast(stopName(f.code));
-  }
+  if ((state.mode === 'onboard' && state.trip) || (state.mode === 'waiting' && state.wait))
+    openStopCard(f.code, feats[0].layer.id === 'route-stops' ? f.idx : null);
 }
+
+// ---------- stop card: tap a stop while on a trip or waiting ----------
+const card = { code: null, idx: null, timer: null };
+function closeStopCard() { clearInterval(card.timer); card.timer = null; card.code = null; $('stopCard').hidden = true; $('stopCard').innerHTML = ''; }
+function openStopCard(code, idx) {
+  const st = state.stops[code]; if (!st) return;
+  clearInterval(card.timer);
+  card.code = code; card.idx = idx;
+  const R = state.R, T = state.mode === 'onboard' ? state.trip : null, W = state.mode === 'waiting' ? state.wait : null;
+  const box = $('stopCard'); box.innerHTML = '';
+  const mine = h('div', { class: 'mine' }), list = h('div', null, h('div', { class: 'note' }, 'Loading live arrivals…'));
+  const upd = h('span', { class: 'meta' });
+  // can you alight here? only stops still ahead on your own route
+  const canAlight = idx != null && (T ? R.stopCh[idx] > T.disp + 20 && idx !== T.alightIdx : W ? idx > W.idx && idx !== W.alightIdx : false);
+  box.append(
+    panelHead(st[2], closeStopCard, null, () => loadStopCard()),
+    h('div', { class: 'sub' }, code + ' · ' + st[3] + (idx != null ? ' · Stop #' + (idx + 1) + ' of ' + R.codes.length : ' · other direction')),
+    idx != null ? mine : null,
+    h('h3', null, 'Live arrivals ', upd), list, legend(),
+    h('div', { class: 'row' },
+      canAlight ? h('button', { class: 'pill primary', onclick: () => {
+        if (T) setAlight(idx); else { W.alightIdx = idx; updateStops(true); renderWaitPanel(); }
+        toast('🏁 Alighting at ' + st[2]); closeStopCard();
+      } }, '🏁 Alight here') : null,
+      h('button', { class: 'pill', onclick: closeStopCard }, '✕ Close')));
+  box.hidden = false; box.scrollTop = 0;
+  const updateMine = () => {
+    if (idx == null || card.code !== code) return;
+    if (T) {
+      const ch = R.stopCh[idx];
+      if (ch < T.disp - 20) { mine.textContent = '✓ Your bus has passed this stop'; return; }
+      if (Math.abs(ch - T.disp) <= 20) { mine.textContent = '🚌 Your bus is at this stop'; return; }
+      const ahead = R.stopCh.findIndex(c => c > T.disp + 20), n = idx - ahead + 1, dist = ch - T.disp;
+      const mv = state.vehicles.find(v => v.id === T.myVid), lta = mv && !T.sim ? mv.etaByCode[code] : null;
+      const mins = lta ? minsUntil(lta) : Math.round(dist / Math.max(T.speed || 0, 5) / 60);
+      mine.textContent = `🚌 Your bus: ${n} stop${n === 1 ? '' : 's'} ahead · ${fmtDist(dist)} · ≈${Math.max(1, mins)} min` + (idx === T.alightIdx ? ' · 🏁 your stop' : '');
+    } else if (W) {
+      mine.textContent = idx < W.idx ? 'Before your boarding stop' : idx === W.idx ? '● Your boarding stop' :
+        `${idx - W.idx} stop${idx - W.idx === 1 ? '' : 's'} after your boarding stop` + (idx === W.alightIdx ? ' · 🏁 your stop' : '');
+    }
+  };
+  updateMine();
+  card.load = async () => {
+    try {
+      const data = await api('/multi-arrival?stops=' + code);
+      if (card.code !== code) return;
+      const live = ((data.stops || {})[code] || []).filter(sv => sv.buses && sv.buses.length)
+        .sort((a, b) => (parseEta(a.buses[0].eta) || Infinity) - (parseEta(b.buses[0].eta) || Infinity));
+      list.innerHTML = '';
+      if (!live.length) list.append(h('div', { class: 'note' }, 'No buses arriving right now.'));
+      for (const sv of live) {
+        const b0 = sv.buses[0] || {};
+        list.append(h('div', { class: 'arr' },
+          h('span', { class: 'chip' + (R && sv.ServiceNo === R.no ? ' current' : '') }, sv.ServiceNo),
+          h('div', { class: 'info' },
+            h('div', { class: 'dest' }, '→ ' + (b0.dest ? stopName(b0.dest) : '') + (b0.type ? ' · ' + (TYPE_TXT[b0.type] || b0.type) : '') + (b0.feature === 'WAB' ? ' · ♿' : '')),
+            h('div', { class: 'times' }, timePills(sv.buses)))));
+      }
+      upd.textContent = '· ' + hhmm();
+    } catch (e) {
+      if (card.code !== code) return;
+      list.innerHTML = '';
+      list.append(e.silent ? quietNote() : h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + e.message));
+    }
+    updateMine();
+  };
+  card.load();
+  card.timer = setInterval(() => { if (!document.hidden && card.code === code) card.load(); else updateMine(); }, POLL_MS);
+}
+function loadStopCard() { return card.load ? card.load() : null; }
 
 // ======================= polling =======================
 function setPoll(fn, ms = POLL_MS) {
@@ -1828,6 +1907,7 @@ function frame(ts) {
 function enterMode(m, chip) {
   if (state.mode === 'onboard' && m !== 'onboard') stopTrip();
   state.mode = m;
+  if (typeof closeStopCard === 'function') closeStopCard();
   clearInterval(state.sheetTimer); state.sheetStop = null;
   map.getSource('sel-stop') && map.getSource('sel-stop').setData(emptyFC());
   setTopMode(chip);
