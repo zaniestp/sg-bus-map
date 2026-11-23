@@ -210,6 +210,7 @@
 <div id="bldgLegend" hidden>
   <span style="--c:#ff6b5b">Food</span><span style="--c:#ff9f1c">Shopping</span>
   <span style="--c:#9b5de5">Commercial</span><span style="--c:#7fb2e5">Residential</span>
+  <span style="--c:#f472b6">School</span>
 </div>
 
 <div id="fabs">
@@ -638,7 +639,8 @@ function shelterParts(stopXY, roadXY, th) {
   ];
 }
 // ---------- buildings coloured by use ----------
-const BLDG_COLORS = { food: '#ff6b5b', shop: '#ff9f1c', commercial: '#9b5de5', residential: '#7fb2e5', other: '#d9d9d9' };
+const BLDG_COLORS = { food: '#ff6b5b', shop: '#ff9f1c', commercial: '#9b5de5', residential: '#7fb2e5', school: '#f472b6', other: '#d9d9d9' };
+const SCHOOL_CLASSES = new Set(['school', 'college', 'university', 'kindergarten']);
 const FOOD_CLASSES = new Set(['restaurant', 'fast_food', 'cafe', 'food_court', 'bakery', 'ice_cream', 'bar', 'pub', 'beer', 'biergarten']);
 const SHOP_CLASSES = new Set(['shop', 'grocery', 'supermarket', 'clothing_store', 'department_store', 'mall', 'marketplace', 'convenience',
   'jewelry', 'florist', 'hardware', 'electronics', 'mobile_phone', 'books', 'gift', 'alcohol_shop', 'optician', 'shoes', 'furniture',
@@ -653,35 +655,85 @@ function inRing(pt, ring) {
   return inside;
 }
 function ringBox(r) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const [x, y] of r) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y; } return [a, b, c, d]; }
-// buildings: [{ ring:[[x,y]..] (metres), h, b }], landuse: [{ cls, ring }], pois: [{ x, y, cls, sub }]
-// returns per building: [{ b, h, cat }] parts (a ground-floor band for shops/food under flats or offices)
+function segDist(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  const t = L2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+function ringDist(p, ring) { let m = Infinity; for (let i = 1; i < ring.length; i++) m = Math.min(m, segDist(p, ring[i - 1], ring[i])); return m; }
+// buildings: [{ ring:[[x,y]..] (metres), h, b, outline }] (outline = invisible footprint that groups parts),
+// landuse: [{ cls, ring }], pois: [{ x, y, cls, sub }]
+// returns per building the parts to draw: [{ b, h, cat }] ([] for outlines)
 function classifyBuildings(buildings, landuse, pois) {
   const cell = 60, grid = new Map(), gk = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
   for (const q of pois) { const k = gk(q.x, q.y); (grid.get(k) || grid.set(k, []).get(k)).push(q); }
   const lus = landuse.map(l => ({ ...l, box: ringBox(l.ring) }));
-  const rank = { retail: 4, commercial: 3, residential: 2, industrial: 1 };
-  return buildings.map(bd => {
-    const box = ringBox(bd.ring), cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
-    let food = 0, shop = 0, mall = false;
+  const rank = { school: 6, university: 6, college: 6, kindergarten: 6, retail: 4, commercial: 3, residential: 2, industrial: 1 };
+  const isSchoolLu = c => c === 'school' || c === 'university' || c === 'college' || c === 'kindergarten';
+
+  // 1) facts about each piece
+  const info = buildings.map(bd => {
+    const box = ringBox(bd.ring), c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+    let food = 0, shop = 0, mall = false, school = 0;
     for (let gx = Math.floor(box[0] / cell); gx <= Math.floor(box[2] / cell); gx++)
       for (let gy = Math.floor(box[1] / cell); gy <= Math.floor(box[3] / cell); gy++)
         for (const q of grid.get(gx + ',' + gy) || []) {
           if (q.x < box[0] || q.x > box[2] || q.y < box[1] || q.y > box[3] || !inRing([q.x, q.y], bd.ring)) continue;
-          if (FOOD_CLASSES.has(q.cls) || FOOD_CLASSES.has(q.sub)) food++;
+          if (SCHOOL_CLASSES.has(q.cls) || SCHOOL_CLASSES.has(q.sub)) school++;
+          else if (FOOD_CLASSES.has(q.cls) || FOOD_CLASSES.has(q.sub)) food++;
           else if (SHOP_CLASSES.has(q.cls) || SHOP_CLASSES.has(q.sub)) { shop++; if (MALL_SUBS.has(q.sub) || MALL_SUBS.has(q.cls)) mall = true; }
         }
-    let lu = null;
+    let lu = null, nearRes = false;
     for (const l of lus) {
-      if (!rank[l.cls] || cx < l.box[0] || cx > l.box[2] || cy < l.box[1] || cy > l.box[3]) continue;
-      if (inRing([cx, cy], l.ring) && (!lu || rank[l.cls] > rank[lu])) lu = l.cls;
+      if (!rank[l.cls]) continue;
+      const inBox = c[0] >= l.box[0] && c[0] <= l.box[2] && c[1] >= l.box[1] && c[1] <= l.box[3];
+      if (inBox && inRing(c, l.ring)) { if (!lu || rank[l.cls] > rank[lu]) lu = l.cls; }
+      else if (l.cls === 'residential' && !nearRes && c[0] >= l.box[0] - 40 && c[0] <= l.box[2] + 40 && c[1] >= l.box[1] - 40 && c[1] <= l.box[3] + 40)
+        nearRes = ringDist(c, l.ring) <= 40;                    // residential area just short of the block
     }
-    const h = bd.h, b = bd.b || 0;
+    return { box, c, food, shop, mall, school, lu, nearRes };
+  });
+
+  // 2) group touching/overlapping pieces (and parts inside an outline) into complexes
+  const parent = buildings.map((_, i) => i);
+  const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  const unite = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[b] = a; };
+  const bg = new Map(), bcell = 80;
+  info.forEach((f, i) => {
+    for (let gx = Math.floor((f.box[0] - 2) / bcell); gx <= Math.floor((f.box[2] + 2) / bcell); gx++)
+      for (let gy = Math.floor((f.box[1] - 2) / bcell); gy <= Math.floor((f.box[3] + 2) / bcell); gy++) {
+        const k = gx + ',' + gy, arr = bg.get(k) || bg.set(k, []).get(k);
+        for (const j of arr) {
+          const g = info[j];
+          if (f.box[0] - 2 > g.box[2] || g.box[0] - 2 > f.box[2] || f.box[1] - 2 > g.box[3] || g.box[1] - 2 > f.box[3]) continue;
+          const A = buildings[i], B = buildings[j];
+          if ((A.outline && inRing(g.c, A.ring)) || (B.outline && inRing(f.c, B.ring)) || inRing(g.c, A.ring) || inRing(f.c, B.ring) ||
+              A.ring.some(v => ringDist(v, B.ring) <= 2) || B.ring.some(v => ringDist(v, A.ring) <= 2)) unite(i, j);
+        }
+        arr.push(i);
+      }
+  });
+  const cx = new Map();
+  info.forEach((f, i) => {
+    const r = find(i), t = cx.get(r) || cx.set(r, { food: 0, shop: 0, mall: false, school: 0, retail: false, schoolLu: false }).get(r);
+    t.food += f.food; t.shop += f.shop; t.school += f.school; t.mall = t.mall || f.mall;
+    t.retail = t.retail || f.lu === 'retail'; t.schoolLu = t.schoolLu || isSchoolLu(f.lu);
+  });
+
+  // 3) colour each visible piece
+  return buildings.map((bd, i) => {
+    if (bd.outline) return [];
+    const f = info[i], t = cx.get(find(i)), h = bd.h, b = bd.b || 0;
     const band = (low, high) => h > 8 ? [{ b, h: Math.min(b + 4, h), cat: low }, { b: Math.min(b + 4, h), h, cat: high }] : [{ b, h, cat: low }];
-    if (mall || lu === 'retail') return [{ b, h, cat: 'shop' }];
-    if (lu === 'residential') return food ? band('food', 'residential') : shop ? band('shop', 'residential') : [{ b, h, cat: 'residential' }];
-    if (lu === 'commercial') return food ? band('food', 'commercial') : shop ? band('shop', 'commercial') : [{ b, h, cat: 'commercial' }];
-    if (food && food >= shop) return [{ b, h, cat: 'food' }];
-    if (shop) return [{ b, h, cat: 'shop' }];
+    if (isSchoolLu(f.lu) || f.school || t.school || t.schoolLu) return [{ b, h, cat: 'school' }];
+    if (t.mall || t.retail || t.shop >= 3) return [{ b, h, cat: 'shop' }];          // whole shopping centre
+    const lu = f.lu || (f.nearRes ? 'residential' : null);
+    if (lu === 'residential') return f.food ? band('food', 'residential') : f.shop ? band('shop', 'residential') : [{ b, h, cat: 'residential' }];
+    if (lu === 'commercial') return f.food ? band('food', 'commercial') : f.shop ? band('shop', 'commercial') : [{ b, h, cat: 'commercial' }];
+    if (f.food && f.food >= f.shop) return [{ b, h, cat: 'food' }];
+    if (f.shop) return [{ b, h, cat: 'shop' }];
+    // tall-block rule: 7+ storeys with no shops/food outside commercial/industrial areas → almost always HDB/condo
+    if (h >= 20 && lu !== 'industrial') return [{ b, h, cat: 'residential' }];
     return [{ b, h, cat: 'other' }];
   });
 }
@@ -1001,17 +1053,17 @@ function computeBldg() {
   // pieces of one building can come from several tiles: keep one per id (largest), or every distinct piece
   const pieces = new Map();
   for (const f of raw) {
-    if (f.properties.hide_3d) continue;
+    const outline = !!f.properties.hide_3d;      // footprint of a multi-part building: used for grouping only
     const ring = outerRings(f.geometry)[0]; if (!ring || ring.length < 4) continue;
     const [x0, y0] = ring[0]; if (x0 < W || x0 > E || y0 < S || y0 > N) continue;
     const xy = ring.map(toXY), bx = ringBox(xy), area = (bx[2] - bx[0]) * (bx[3] - bx[1]);
-    const key = BLDG.useState ? 'id' + f.id : (f.id ?? '') + '|' + ring[0][0].toFixed(6) + ',' + ring[0][1].toFixed(6) + '|' + ring.length;
+    const key = (outline ? 'o' : '') + (BLDG.useState ? 'id' + f.id : (f.id ?? '') + '|' + ring[0][0].toFixed(6) + ',' + ring[0][1].toFixed(6) + '|' + ring.length);
     const prev = pieces.get(key);
-    if (!prev || area > prev.area) pieces.set(key, { f, xy, area });
+    if (!prev || area > prev.area) pieces.set(key, { f, xy, area, outline });
     if (pieces.size >= 4000) break;
   }
   const list = [...pieces.values()];
-  const blds = list.map(({ f, xy }) => ({ ring: xy, h: +(f.properties.render_height ?? f.properties.height ?? 10), b: +(f.properties.render_min_height ?? f.properties.min_height ?? 0) }));
+  const blds = list.map(({ f, xy, outline }) => ({ ring: xy, outline, h: +(f.properties.render_height ?? f.properties.height ?? 10), b: +(f.properties.render_min_height ?? f.properties.min_height ?? 0) }));
   const landuse = [];
   for (const f of tileFeatures('landuse')) for (const r of outerRings(f.geometry)) landuse.push({ cls: f.properties.class, ring: r.map(toXY) });
   const pois = tileFeatures('poi').filter(f => f.geometry && f.geometry.type === 'Point').map(f => { const q = toXY(f.geometry.coordinates); return { x: q[0], y: q[1], cls: f.properties.class, sub: f.properties.subclass }; });
@@ -1020,6 +1072,7 @@ function computeBldg() {
   const props = (cat, b, h) => { const c = BLDG_COLORS[cat]; return { b, h, cat, c, cm: themeColor(c, 'morning', 'ext'), cn: themeColor(c, 'night', 'ext') }; };
   parts.forEach((ps, i) => {
     const { f, xy } = list[i];
+    if (!ps.length) return;                             // outline – not drawn
     for (const pt of ps) cats[pt.cat] = (cats[pt.cat] || 0) + 1;
     if (BLDG.useState) {
       const body = ps[ps.length - 1].cat;              // whole building takes the upper (main) use
