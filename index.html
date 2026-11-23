@@ -211,9 +211,9 @@
 <canvas id="wx" hidden></canvas>
 <div id="wxChip" hidden></div>
 <div id="bldgLegend" hidden>
-  <span style="--c:#ff6b5b">Food</span><span style="--c:#ff9f1c">Shopping</span>
-  <span style="--c:#9b5de5">Commercial</span><span style="--c:#7fb2e5">Residential</span>
-  <span style="--c:#f472b6">School</span>
+  <span data-cat="food" style="--c:#ff6b5b">Food</span><span data-cat="shop" style="--c:#ff9f1c">Shopping</span>
+  <span data-cat="commercial" style="--c:#9b5de5">Commercial</span><span data-cat="residential" style="--c:#7fb2e5">Residential</span>
+  <span data-cat="school" style="--c:#f472b6">School</span>
 </div>
 
 <div id="fabs">
@@ -645,6 +645,8 @@ function shelterParts(stopXY, roadXY, th) {
 // ---------- buildings coloured by use ----------
 const BLDG_COLORS = { food: '#ff6b5b', shop: '#ff9f1c', commercial: '#9b5de5', residential: '#7fb2e5', school: '#f472b6', other: '#d9d9d9' };
 const SCHOOL_CLASSES = new Set(['school', 'college', 'university', 'kindergarten']);
+// night colours: deeper, but keep their colour so they don't look grey in the dark theme
+const BLDG_NIGHT = { food: '#d2463b', shop: '#e08a1a', commercial: '#8a5cd6', residential: '#4a80c8', school: '#d0559c', other: '#3a3f47' };
 const FOOD_CLASSES = new Set(['restaurant', 'fast_food', 'cafe', 'food_court', 'bakery', 'ice_cream', 'bar', 'pub', 'beer', 'biergarten']);
 const SHOP_CLASSES = new Set(['shop', 'grocery', 'supermarket', 'clothing_store', 'department_store', 'mall', 'marketplace', 'convenience',
   'jewelry', 'florist', 'hardware', 'electronics', 'mobile_phone', 'books', 'gift', 'alcohol_shop', 'optician', 'shoes', 'furniture',
@@ -1009,7 +1011,7 @@ function setupBuildingColors() {
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 0.95 } },
     map.getLayer('route-casing') ? 'route-casing' : undefined);
   // Building numbers: "Blk 524A" on homes, plain numbers elsewhere; homes win when labels would overlap
-  map.addSource('bldg-labels', { type: 'geojson', data: emptyFC() });
+  map.addSource('bldg-labels', { type: 'geojson', data: emptyFC(), attribution: 'Block numbers © <a href="https://www.onemap.gov.sg/" target="_blank">OneMap</a> / SLA' });
   map.addLayer({ id: 'bldg-labels', type: 'symbol', source: 'bldg-labels', minzoom: 16.5,
     layout: { 'text-field': ['get', 'text'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 16.5, 13, 19, 16],
               'symbol-sort-key': ['get', 'prio'], 'text-padding': 4, 'text-allow-overlap': false },
@@ -1028,7 +1030,7 @@ function themedBase(id) {
 }
 function applyBldgPaint() {           // feature-state colours on the style's own building layers
   if (!BLDG.ready) return;
-  const t = state.theme || 'afternoon', col = k => t === 'afternoon' ? BLDG_COLORS[k] : themeColor(BLDG_COLORS[k], t, 'ext');
+  const t = state.theme || 'afternoon', col = k => t === 'afternoon' ? BLDG_COLORS[k] : t === 'night' ? BLDG_NIGHT[k] : themeColor(BLDG_COLORS[k], t, 'ext');
   for (const l of BLDG.layers) {
     const base = themedBase(l.id);
     try {
@@ -1068,8 +1070,10 @@ function inspectBuilding(point) {
   }
   if (idx < 0) { const q = toXY(map.unproject(point).toArray()); idx = list.findIndex(x => !x.outline && inRing(q, x.xy)); }
   if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
-  const ad = BLDG.info.addr && BLDG.info.addr[idx];
-  toast('🏢 ' + parts[idx].why + ' · ' + (ad ? 'address: ' + [...ad].join(', ') : 'no address number'), 7000);
+  const ad = BLDG.info.addr && BLDG.info.addr[idx], om = BLDG.info.om && BLDG.info.om[idx];
+  const omTxt = om ? 'OneMap: ' + om.map(a => (a.n && a.n !== 'NIL' && !/^HDB-/.test(a.n) ? a.n + ' ' : '') + 'Blk ' + a.b + (a.p && a.p !== 'NIL' ? ' · ' + a.p : '')).join('; ')
+              : (OM.off ? 'OneMap off' : 'OneMap: no number');
+  toast('🏢 ' + parts[idx].why + ' · ' + omTxt + ' · map: ' + (ad ? [...ad].join(', ') : 'no number') + ' · points in view: OneMap ' + (BLDG.info.omCount || 0) + ', map ' + (BLDG.info.addrCount || 0), 9000);
   return true;
 }
 (() => {
@@ -1088,6 +1092,70 @@ function inspectBuilding(point) {
   });
   map.on('contextmenu', e => { inspectBuilding(e.point); });
 })();
+// ---------- OneMap block numbers (official SLA addresses, via the Worker's /blocks) ----------
+// The map is cut into 200 m squares; each square is fetched once, kept on the phone for 90 days,
+// and OneMap numbers take priority over the map's own address points.
+const OM = { cells: new Map(), queue: [], busy: 0, off: false, CELL: 200, MAX_BUSY: 2, MAX_CELLS: 16, KEEP_DAYS: 90 };
+function omCellsInView() {
+  const b = map.getBounds(), c = toXY(map.getCenter().toArray());
+  const p1 = toXY([b.getWest(), b.getSouth()]), p2 = toXY([b.getEast(), b.getNorth()]);
+  const out = [];
+  for (let gx = Math.floor(p1[0] / OM.CELL); gx <= Math.floor(p2[0] / OM.CELL); gx++)
+    for (let gy = Math.floor(p1[1] / OM.CELL); gy <= Math.floor(p2[1] / OM.CELL); gy++)
+      out.push({ k: gx + ',' + gy, d: Math.hypot((gx + 0.5) * OM.CELL - c[0], (gy + 0.5) * OM.CELL - c[1]) });
+  return out.filter(x => x.d < 800).sort((a, b) => a.d - b.d).slice(0, OM.MAX_CELLS).map(x => x.k);   // nearest squares first, not the far horizon
+}
+function omLoad(k) {                       // from the phone's storage
+  try {
+    const v = JSON.parse(localStorage.getItem('om1:' + k) || 'null');
+    if (v && Date.now() - v.t < OM.KEEP_DAYS * 864e5) return v.a;
+  } catch {}
+  return null;
+}
+function omSave(k, a) {
+  const put = () => localStorage.setItem('om1:' + k, JSON.stringify({ t: Date.now(), a }));
+  try { put(); } catch {
+    try {                                  // storage full: drop the oldest half of saved squares, then retry
+      const keys = Object.keys(localStorage).filter(x => x.startsWith('om1:'))
+        .map(x => { let t = 0; try { t = JSON.parse(localStorage.getItem(x)).t; } catch {} return [x, t]; })
+        .sort((a, b) => a[1] - b[1]);
+      keys.slice(0, Math.ceil(keys.length / 2)).forEach(([x]) => localStorage.removeItem(x));
+      put();
+    } catch {}
+  }
+}
+function omWanted() {                      // called from computeBldg: queue squares on screen that aren't known yet
+  if (OM.off || !API || map.getZoom() < 16.5) return;
+  for (const k of omCellsInView()) {
+    const have = OM.cells.get(k);
+    if (have && (Array.isArray(have) || have === 'loading' || (have.retry && Date.now() < have.retry))) continue;
+    const saved = omLoad(k);
+    if (saved) { OM.cells.set(k, saved); continue; }
+    if (!OM.queue.includes(k)) OM.queue.push(k);
+  }
+  omPump();
+}
+function omPump() {
+  while (!OM.off && OM.busy < OM.MAX_BUSY && OM.queue.length) {
+    const k = OM.queue.shift();
+    if (!omCellsInView().includes(k)) continue;          // scrolled away – skip, it will be asked again if needed
+    OM.busy++; OM.cells.set(k, 'loading');
+    fetch(API + '/blocks?cell=' + k, { headers: apiHeaders() })
+      .then(async r => {
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 501) { OM.off = true; OM.cells.delete(k); return; }   // OneMap not set up on the Worker
+        if (!r.ok || !Array.isArray(d.blocks)) throw new Error(d.error || r.status);
+        OM.cells.set(k, d.blocks); omSave(k, d.blocks); scheduleBldg();
+      })
+      .catch(() => OM.cells.set(k, { retry: Date.now() + 60000 }))   // quiet: try again in a minute
+      .finally(() => { OM.busy--; omPump(); });
+  }
+}
+function omPoints(W, E, S, N) {            // OneMap addresses already loaded inside the box
+  const out = [];
+  for (const v of OM.cells.values()) if (Array.isArray(v)) for (const a of v) if (a.lng >= W && a.lng <= E && a.lat >= S && a.lat <= N) out.push(a);
+  return out;
+}
 function updateBldgLegend() { $('bldgLegend').hidden = !(BLDG.on && BLDG.ready && map.getZoom() >= 16); }
 function scheduleBldg() { if (!BLDG.on || !BLDG.ready) return; clearTimeout(BLDG.timer); BLDG.timer = setTimeout(computeBldg, 350); }
 function tileFeatures(sl) {
@@ -1149,7 +1217,7 @@ function computeBldg() {
   const parts = classifyBuildings(blds, landuse, pois, grounds);
   BLDG.info = { list, parts, addr: {} };                       // for the long-press "what is this building?" check
   const feats = [], cats = {}, src = map.getSource('openmaptiles'), gj = src.type === 'geojson';
-  const props = (cat, b, h) => { const c = BLDG_COLORS[cat]; return { b, h, cat, c, cm: themeColor(c, 'morning', 'ext'), cn: themeColor(c, 'night', 'ext') }; };
+  const props = (cat, b, h) => { const c = BLDG_COLORS[cat]; return { b, h, cat, c, cm: themeColor(c, 'morning', 'ext'), cn: BLDG_NIGHT[cat] }; };
   parts.forEach((ps, i) => {
     const { f, xy } = list[i];
     if (!ps.length) return;                             // outline – not drawn
@@ -1180,28 +1248,51 @@ function computeBldg() {
       for (let gy = Math.floor(bx[1] / cell2); gy <= Math.floor(bx[3] / cell2); gy++) { const k = gx + ',' + gy; (bgrid.get(k) || bgrid.set(k, []).get(k)).push(i); }
   });
   const labels = [], used = new Set();
-  for (const f of tileFeatures('housenumber')) {
-    const hn = f.properties.housenumber; if (!hn || !f.geometry || f.geometry.type !== 'Point') continue;
-    const q = toXY(f.geometry.coordinates);
+  const findBldg = q => {                 // building an address point sits in, else the nearest within 30 m
     let i = (bgrid.get(Math.floor(q[0] / cell2) + ',' + Math.floor(q[1] / cell2)) || []).find(j => inRing(q, list[j].xy));
     if (i == null) {          // L-shaped / curved blocks: the address point can sit just outside the outline
-      let bd = 15;
-      for (let gx = Math.floor((q[0] - 15) / cell2); gx <= Math.floor((q[0] + 15) / cell2); gx++)
-        for (let gy = Math.floor((q[1] - 15) / cell2); gy <= Math.floor((q[1] + 15) / cell2); gy++)
+      let bd = 30;           // big U-shaped blocks: the point can sit in the courtyard
+      for (let gx = Math.floor((q[0] - 30) / cell2); gx <= Math.floor((q[0] + 30) / cell2); gx++)
+        for (let gy = Math.floor((q[1] - 30) / cell2); gy <= Math.floor((q[1] + 30) / cell2); gy++)
           for (const j of bgrid.get(gx + ',' + gy) || []) { const d = ringDist(q, list[j].xy); if (d < bd) { bd = d; i = j; } }
     }
-    if (i == null) continue;
-    (BLDG.info.addr[i] ||= new Set()).add(String(hn));
+    return i;
+  };
+  const addLabel = (i, hn, geometry) => {
     const cat = parts[i][parts[i].length - 1].cat, key = i + '|' + hn;
-    if (used.has(key)) continue; used.add(key);
+    if (used.has(key)) return; used.add(key);
     // text in a darker shade of the building's colour on a white outline (night: light text, dark outline)
     const dark = { residential: '#0d2c6c', food: '#9b1c1c', shop: '#9a4b00', commercial: '#4c1d95', school: '#9d174d', other: '#374151' }[cat] || '#374151';
     const lightTxt = { residential: '#bfdbfe', food: '#fecaca', shop: '#fed7aa', commercial: '#ddd6fe', school: '#fbcfe8', other: '#e5e7eb' }[cat] || '#e5e7eb';
-    labels.push({ type: 'Feature', geometry: f.geometry, properties: {
+    labels.push({ type: 'Feature', geometry, properties: {
       text: cat === 'residential' ? 'Blk ' + hn : String(hn), cat, prio: cat === 'residential' ? 0 : 1,
       tc: night ? lightTxt : dark, halo: night ? '#0b1220' : '#ffffff' } });
+  };
+  // 1) OneMap (official) numbers first
+  BLDG.info.om = {};
+  omWanted();
+  const omSeen = new Set();
+  for (const a of omPoints(W, E, S, N)) {
+    const id = a.b + '|' + a.p; if (omSeen.has(id)) continue; omSeen.add(id);
+    const i = findBldg(toXY([a.lng, a.lat]));
+    if (i == null) continue;
+    (BLDG.info.om[i] ||= []).push(a);
+    addLabel(i, a.b, { type: 'Point', coordinates: [a.lng, a.lat] });
+  }
+  // 2) the map's own address points, for buildings OneMap didn't number
+  const hnSeen = new Set();
+  for (const f of tileFeatures('housenumber')) {
+    const hn = f.properties.housenumber; if (!hn || !f.geometry || f.geometry.type !== 'Point') continue;
+    hnSeen.add(hn + '@' + f.geometry.coordinates.map(v => v.toFixed(5)).join(','));
+    const i = findBldg(toXY(f.geometry.coordinates));
+    if (i == null) continue;
+    (BLDG.info.addr[i] ||= new Set()).add(String(hn));
+    if (BLDG.info.om[i]) continue;
+    addLabel(i, hn, f.geometry);
   }
   map.getSource('bldg-labels').setData({ type: 'FeatureCollection', features: labels });
+  BLDG.info.addrCount = hnSeen.size;
+  BLDG.info.omCount = omSeen.size;
   state.bldgStats = { method: BLDG.useState ? 'feature-state' : 'copies', buildings: blds.length, labels: labels.length, ms: Math.round(performance.now() - t0), cats };
   updateBldgLegend();
 }
@@ -1350,6 +1441,7 @@ function applyTheme(t) {
   const night = t === 'night', key = t === 'morning' ? 'cm' : night ? 'cn' : 'c';
   for (const id of ['trees', 'shelters', 'bldg-color']) if (map.getLayer(id)) map.setPaintProperty(id, 'fill-extrusion-color', ['coalesce', ['get', key], ['get', 'c']]);
   if (typeof applyBldgPaint === 'function') applyBldgPaint();
+  for (const sp of document.querySelectorAll('#bldgLegend span[data-cat]')) sp.style.setProperty('--c', (night ? BLDG_NIGHT : BLDG_COLORS)[sp.dataset.cat]);
   if (map.getLayer('bldg-labels') && typeof scheduleBldg === 'function') scheduleBldg();   // labels re-made in the new theme colours
   map.setPaintProperty('route-casing', 'line-color', night ? '#0b1220' : t === 'morning' ? '#fff6d6' : '#ffffff');
   map.setPaintProperty('route-line', 'line-color', ['match', ['get', 'leg'], 'mine', night ? '#7c93ff' : '#1e3a8a', '#ff9100']);
@@ -2708,6 +2800,9 @@ $('saveBtn').onclick = () => {
   store.set('accessCode', $('codeInput').value.trim());
   $('settings').hidden = true;
   toast('Settings saved');
+  OM.off = false; OM.queue = [];                                   // let block numbers try again with the new settings
+  for (const [k, v] of OM.cells) if (!Array.isArray(v)) OM.cells.delete(k);
+  scheduleBldg();
   if (state.pollFn) state.pollFn();
 };
 $('testBtn').onclick = async () => {
