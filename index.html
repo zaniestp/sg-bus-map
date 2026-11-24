@@ -209,7 +209,9 @@
   #creditBox small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
   #sndBtn.off { opacity: .75; }
   .sndrow { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
-  #sndVol { width: 100%; margin-top: 8px; }
+  #sndVol { width: 100%; margin-top: 4px; }
+  .callrow { align-items: center; gap: 6px 8px; }
+  .callrow .pill { padding: 4px 10px; margin-right: 10px; }
 </style>
 </head>
 <body>
@@ -304,12 +306,19 @@
     <input type="range" id="birdFreq" min="0" max="100" step="10" style="width:100%" aria-label="How often birds appear">
     <h2 style="margin-top:14px">Sounds</h2>
     <div class="sndrow">
-      <label class="check"><input type="checkbox" id="sndBirds"> 🐦 Birds</label>
       <label class="check"><input type="checkbox" id="sndBells"> 🔔 Bells</label>
       <label class="check"><input type="checkbox" id="sndRain"> 🌧 Rain</label>
       <label class="check"><input type="checkbox" id="sndThunder"> ⛈ Thunder</label>
-      <label class="check"><input type="checkbox" id="sndNightjar"> 🌙 Nightjar</label>
     </div>
+    <div class="sub" style="margin-top:10px">Bird calls</div>
+    <div class="sndrow callrow">
+      <label class="check"><input type="checkbox" id="sndOriole"> 🟡 Oriole</label><button class="pill" id="playOriole" aria-label="Play oriole call">▶</button>
+      <label class="check"><input type="checkbox" id="sndCrow"> ⚫ Crow</label><button class="pill" id="playCrow" aria-label="Play crow call">▶</button>
+      <label class="check"><input type="checkbox" id="sndNightjar"> 🌙 Nightjar</label><button class="pill" id="playNightjar" aria-label="Play nightjar call">▶</button>
+    </div>
+    <div class="sub" style="margin-top:8px">Bird call volume</div>
+    <input type="range" id="callVol" min="0" max="100" step="5" style="width:100%" aria-label="Bird call volume">
+    <div class="sub" style="margin-top:8px">Trip sounds volume (bells, rain, thunder)</div>
     <input type="range" id="sndVol" min="0" max="100" step="5" aria-label="Trip sound volume">
     <button class="btn" id="sndPreview" style="margin-top:8px;width:100%">▶ Preview sounds</button>
     <div class="row">
@@ -348,7 +357,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.7', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '3.8', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -2021,6 +2030,7 @@ function beep(n = 2) {
 }
 // ======================= trip ambience: birds / crickets, bells, rain, thunder =======================
 // All sounds are made live with Web Audio – no sound files. Plays only on a trip (or Preview), never louder than alerts.
+try { if (localStorage.getItem('snd_birds') === '0' && localStorage.getItem('snd_oriole') === null) { localStorage.setItem('snd_oriole', '0'); localStorage.setItem('snd_crow', '0'); } } catch {}
 const SND = {
   on: k => store.get('snd_' + k) !== '0',                 // birds, bells, rain, thunder – all on unless switched off
   muted: () => store.get('sndMute') === '1',
@@ -2166,11 +2176,11 @@ function placeBirds() {
   const fresh = out.filter(b => !BIRDS.list.some(o => o.id === b.id));
   BIRDS.list = out.concat(keep);
   BIRDS.njVisible = night && out.length > 0;
-  if (fresh.length && Date.now() - (BIRDS.lastCall || 0) > 45000 && !BIRDS.soonT) {
+  if (fresh.length && Date.now() - (BIRDS.lastCall || 0) > CALL_GAP && !BIRDS.soonT) {
     BIRDS.soonT = setTimeout(() => {
       BIRDS.soonT = null;
       const vis = BIRDS.list.filter(x => !x.fly && birdOnScreen(x)), b = vis.find(x => fresh.includes(x)) || vis[0];   // prefer the new arrival
-      if (b && Date.now() - (BIRDS.lastCall || 0) > 45000) callPlay(b.kind, b);
+      if (b && Date.now() - (BIRDS.lastCall || 0) > CALL_GAP) callPlay(b.kind, b);
     }, 3000 + Math.random() * 5000);
   }
   BIRDS.count = n; BIRDS.areas = [...areas.values()].filter(A => A.list.length || !A.lively).length; BIRDS.lively = [...areas.values()].filter(A => A.lively).length;
@@ -2245,7 +2255,7 @@ function birdAt(point) {                                    // tap a bird: a nig
   for (const b of BIRDS.list) { if (b.fly) continue; const q = map.project(toLL([b.x, b.y])); const d = Math.hypot(q.x - point.x, q.y - point.y - 10); if (d < bd) { bd = d; best = b; } }
   if (!best) return false;
   if (SND.muted()) toast('🔇 Sounds are muted – tap 🔊 to hear the birds', 2500);
-  else if (!SND.on(best.kind === 'nightjar' ? 'nightjar' : 'birds')) toast((best.kind === 'nightjar' ? '🌙 Nightjar' : '🐦 Birds') + ' sound is switched off in ⚙ Settings', 2500);
+  else if (!SND.on(best.kind)) toast(({ nightjar: '🌙 Nightjar', oriole: '🟡 Oriole', crow: '⚫ Crow' })[best.kind] + ' calls are switched off in ⚙ Settings', 2500);
   if (BIRDS.nj) { try { BIRDS.nj.src.stop(); } catch {} BIRDS.nj = null; }
   callPlay(best.kind, best, false, true);
   if (best.kind !== 'nightjar') startle(best, true);
@@ -2255,10 +2265,16 @@ function birdAt(point) {                                    // tap a bird: a nig
 // ---- bird calls (your recordings). One call at a time; it comes from the bird's place on screen,
 //      pans with it and fades towards the side it leaves by.
 const CALLS = {
-  nightjar: { file: 'nightjar.m4a', segs: null, vol: 0.54 },
-  oriole:   { file: 'oriole.m4a', segs: [[0, 1.3], [1.65, 1.15], [3.15, 1.1], [4.6, 1.15], [6.1, 1.15], [7.6, 1.1]], vol: 0.5 },
-  crow:     { file: 'crow.m4a', segs: [[0, 2.65], [3.0, 3.25], [6.6, 3.25]], vol: 0.4 }
+  nightjar: { file: 'nightjar.m4a', segs: null, vol: 1 },
+  oriole:   { file: 'oriole.m4a', segs: [[0, 1.3], [1.65, 1.15], [3.15, 1.1], [4.6, 1.15], [6.1, 1.15], [7.6, 1.1]], vol: 1 },
+  crow:     { file: 'crow.m4a', segs: [[0, 2.65], [3.0, 3.25], [6.6, 3.25]], vol: 0.9 }
 };
+const CALL_GAP = 20000;                                      // at least 20 s between calls
+const callVol = () => { const v = store.get('callVol'); return (v === null || !isFinite(+v) ? 80 : +v) / 80; };   // 80 % = full level
+function callOut() {                                         // bird calls share a gentle limiter so loud calls never crackle
+  if (!BIRDS.lim) { BIRDS.lim = actx.createDynamicsCompressor(); BIRDS.lim.threshold.value = -3; BIRDS.lim.knee.value = 3; BIRDS.lim.ratio.value = 12; BIRDS.lim.connect(actx.destination); }
+  return BIRDS.lim;
+}
 async function callBuffer(kind) {
   const C = CALLS[kind]; if (C.buf || !actx) return C.buf;
   if (!C.loading) C.loading = (async () => { try { const r = await fetch(C.file); if (r.ok) C.buf = await actx.decodeAudioData(await r.arrayBuffer()); } catch {} C.loading = null; })();
@@ -2268,7 +2284,7 @@ async function njBuffer() { return callBuffer('nightjar'); }
 function callAllowed(kind) {
   if (SND.muted() || document.hidden) return false;
   if (kind === 'nightjar') return state.theme === 'night' && SND.on('nightjar');
-  return state.theme !== 'night' && !raining() && SND.on('birds') && fxOn();
+  return state.theme !== 'night' && !raining() && SND.on(kind) && fxOn();
 }
 function njAllowed() { return callAllowed('nightjar'); }
 async function callPlay(kind, bird, force, tapped) {
@@ -2279,7 +2295,7 @@ async function callPlay(kind, bird, force, tapped) {
   const buf = await callBuffer(kind); if (!buf || BIRDS.nj) return;
   const C = CALLS[kind], src = actx.createBufferSource(); src.buffer = buf;
   const g = actx.createGain(), pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
-  g.gain.value = 0; src.connect(g); if (pan) { g.connect(pan); pan.connect(actx.destination); } else g.connect(actx.destination);
+  g.gain.value = 0; src.connect(g); if (pan) { g.connect(pan); pan.connect(callOut()); } else g.connect(callOut());
   BIRDS.nj = { src, g, pan, bird: bird || null, kind, fixedPan: (Math.random() - 0.5) * 1.2, force: !!force };
   src.onended = () => { if (BIRDS.nj && BIRDS.nj.src === src) BIRDS.nj = null; };
   if (C.segs) { const [o, d] = C.segs[Math.floor(Math.random() * C.segs.length)]; src.start(0, o, d); }   // one whistle / one caw series
@@ -2292,7 +2308,7 @@ async function njPlay(force) {
 }
 function njFollow() {                                       // follow the bird's place on screen while the call plays
   const N = BIRDS.nj; if (!N) return;
-  const now = actx.currentTime, base = CALLS[N.kind].vol * (SND.vol() / 0.5);
+  const now = actx.currentTime, base = CALLS[N.kind].vol * callVol();
   let gain = base, p = N.fixedPan;
   if (N.bird) {
     const q = map.project(toLL([N.bird.x, N.bird.y])), W = innerWidth, H = innerHeight;
@@ -2301,7 +2317,7 @@ function njFollow() {                                       // follow the bird's
     gain = base * Math.max(0, 1 - out / 260);
     if (out > 0) p = q.x < 0 ? -1 : q.x > W ? 1 : p;              // fades towards the side it left by
     if (map.getZoom() < 15) gain = 0;
-  } else gain = base * 0.55;
+  } else gain = base * (N.force ? 1 : 0.6);          // an unseen bird (rain) sounds further away
   if (!callAllowed(N.kind) && !N.force) gain = 0;
   N.g.gain.setTargetAtTime(gain, now, 0.35);
   if (N.pan) N.pan.pan.setTargetAtTime(p, now, 0.25);
@@ -2315,11 +2331,11 @@ function dayCallSchedule() {                                // daytime: a bird o
   clearTimeout(BIRDS.dayT);
   BIRDS.dayT = setTimeout(() => {
     dayCallSchedule();
-    const vis = BIRDS.list.filter(b => b.kind !== 'nightjar' && birdOnScreen(b));
-    if (!vis.length || !callAllowed('oriole') || Date.now() - (BIRDS.lastCall || 0) < 45000) return;
+    const vis = BIRDS.list.filter(b => b.kind !== 'nightjar' && birdOnScreen(b) && callAllowed(b.kind));
+    if (!vis.length || Date.now() - (BIRDS.lastCall || 0) < CALL_GAP) return;
     const b = vis[Math.floor(Math.random() * vis.length)];
     callPlay(b.kind, b);
-  }, (30 + Math.random() * 60) * 1000);
+  }, (20 + Math.random() * 20) * 1000);                    // every 20–40 s while birds are on screen
 }
 dayCallSchedule();
 let birdMoveT = null;
@@ -3540,13 +3556,18 @@ $('sndBtn').onclick = () => {
   if (!m) { unlockAudio(); if (!store.get('sndHint')) { store.set('sndHint', '1'); toast('🔊 Trip sounds on. No sound? Check media volume – on iPhone also switch off silent mode.', 5000); } }
   else { toast('🔇 Sounds muted'); if (BIRDS.nj) try { BIRDS.nj.src.stop(); } catch {} }
 };
-for (const k of ['Birds', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).onchange = e => { store.set('snd_' + k.toLowerCase(), e.target.checked ? '1' : '0'); sndUpdate(); };
+for (const k of ['Oriole', 'Crow', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).onchange = e => { store.set('snd_' + k.toLowerCase(), e.target.checked ? '1' : '0'); sndUpdate(); };
+$('callVol').oninput = e => store.set('callVol', e.target.value);
+for (const k of ['oriole', 'crow', 'nightjar']) $('play' + k[0].toUpperCase() + k.slice(1)).onclick = () => {
+  unlockAudio(); if (BIRDS.nj) { try { BIRDS.nj.src.stop(); } catch {} BIRDS.nj = null; }
+  callPlay(k, null, true).then(() => { if (!BIRDS.nj && !CALLS[k].buf) toast(k[0].toUpperCase() + k.slice(1) + ' sound file not found – upload ' + CALLS[k].file + ' next to index.html', 5000); });
+};
 $('sndVol').oninput = e => { store.set('sndVol', e.target.value); sndUpdate(); };
 $('sndPreview').onclick = () => {
   if (SND.preview > Date.now()) { SND.preview = 0; $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); return; }
   SND.preview = Date.now() + 20000; sndUpdate(); $('sndPreview').textContent = '■ Stop preview';
-  setTimeout(() => { if (SND.on('birds')) callPlay('oriole', null, true); }, 600);
-  setTimeout(() => { if (SND.on('birds')) callPlay('crow', null, true); }, 2600);
+  setTimeout(() => { if (SND.on('oriole')) callPlay('oriole', null, true); }, 600);
+  setTimeout(() => { if (SND.on('crow')) callPlay('crow', null, true); }, 2600);
   setTimeout(() => { try { if (SND.on('bells')) sndBell(); } catch {} }, 1800);
   setTimeout(() => sndThunder(0, 0.8), 6500);
   setTimeout(() => { if (SND.on('nightjar')) njPlay(true).then(() => { if (!BIRDS.nj && !BIRDS.buf) toast('Nightjar sound file not found – upload nightjar.m4a next to index.html', 5000); }); }, 9500);
@@ -3586,7 +3607,8 @@ async function openCredits() {
 $('creditOk').onclick = () => { $('creditBox').hidden = true; };
 $('creditBox').addEventListener('click', e => { if (e.target === $('creditBox')) $('creditBox').hidden = true; });
 $('ltTestBtn').onclick = () => { $('settings').hidden = true; setTimeout(ltTest, 300); };
-$('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Birds', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).checked = SND.on(k.toLowerCase());
+$('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Oriole', 'Crow', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).checked = SND.on(k.toLowerCase());
+  $('callVol').value = Math.round(callVol() * 80);
   $('fxChk').checked = fxOn();
   $('birdFreq').value = birdFreq(); $('birdFreqTxt').textContent = birdFreqLabel(birdFreq());
   $('sndVol').value = Math.round(SND.vol() * 100);
