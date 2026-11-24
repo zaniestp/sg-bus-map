@@ -348,7 +348,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.5', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '3.6', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -2154,8 +2154,16 @@ function placeBirds() {
     }
     if (out.length >= 14) break;
   }
+  const fresh = out.filter(b => !BIRDS.list.some(o => o.id === b.id));
   BIRDS.list = out.concat(keep);
   BIRDS.njVisible = night && out.length > 0;
+  if (fresh.length && Date.now() - (BIRDS.lastCall || 0) > 45000 && !BIRDS.soonT) {
+    BIRDS.soonT = setTimeout(() => {
+      BIRDS.soonT = null;
+      const vis = BIRDS.list.filter(x => !x.fly && birdOnScreen(x)), b = vis.find(x => fresh.includes(x)) || vis[0];   // prefer the new arrival
+      if (b && Date.now() - (BIRDS.lastCall || 0) > 45000) callPlay(b.kind, b);
+    }, 3000 + Math.random() * 5000);
+  }
   BIRDS.count = n; BIRDS.areas = [...areas.values()].filter(A => A.list.length || !A.lively).length; BIRDS.lively = [...areas.values()].filter(A => A.lively).length;
   drawBirds();
   if (typeof sndUpdate === 'function') sndUpdate();
@@ -2166,7 +2174,7 @@ function drawBirds() {
   for (const b of BIRDS.list) for (const p of birdParts(b.x, b.y, b.z, b.th, b.kind, b.fly ? b.phase : null)) feats.push(p);
   src.setData({ type: 'FeatureCollection', features: feats });
 }
-function startle(b) {                                       // take off: flap up and away from the middle of the screen
+function startle(b, quiet) {                                       // take off: flap up and away from the middle of the screen
   if (!b || b.fly || b.kind === 'nightjar') return;
   // head for the nearest left / right / top edge of the screen – never towards the camera
   const q = map.project(toLL([b.x, b.y])), W = innerWidth;
@@ -2175,7 +2183,7 @@ function startle(b) {                                       // take off: flap up
   let target; try { target = toXY(map.unproject(exits[0][1]).toArray()); } catch { target = [b.x + 1, b.y]; }
   let dx = target[0] - b.x, dy = target[1] - b.y; const d = Math.hypot(dx, dy) || 1;
   const a = Math.atan2(dx / d, dy / d) + (Math.random() - 0.5) * 0.35;
-  if (b.kind === 'crow' && Math.random() < 0.4) setTimeout(() => callPlay('crow', b), 150);   // a startled crow often caws
+  if (!quiet && b.kind === 'crow' && Math.random() < 0.4) setTimeout(() => callPlay('crow', b), 150);   // a startled crow often caws
   // speed in screen terms: leaves the screen in about 3–4 s at any zoom
   const mpp = 40075016 * Math.cos(map.getCenter().lat * Math.PI / 180) / (512 * Math.pow(2, map.getZoom()));
   const sp = Math.max(14, mpp * (65 + Math.random() * 25));
@@ -2222,12 +2230,17 @@ function birdTick() {                                        // now and then one
   }
   if (Math.random() < 0.6) startle(perched[Math.floor(Math.random() * perched.length)]);
 }
-function birdAt(point) {                                    // a tap near a bird startles it
+function birdAt(point) {                                    // tap a bird: a nightjar calls; an oriole / crow takes off calling
   if (!map.getLayer('birds') || !BIRDS.list.length) return false;
-  let best = null, bd = 34;
-  for (const b of BIRDS.list) { if (b.fly || b.kind === 'nightjar') continue; const q = map.project(toLL([b.x, b.y])); const d = Math.hypot(q.x - point.x, q.y - point.y - 8); if (d < bd) { bd = d; best = b; } }
-  if (best) { startle(best); return true; }
-  return false;
+  let best = null, bd = 40;
+  for (const b of BIRDS.list) { if (b.fly) continue; const q = map.project(toLL([b.x, b.y])); const d = Math.hypot(q.x - point.x, q.y - point.y - 10); if (d < bd) { bd = d; best = b; } }
+  if (!best) return false;
+  if (SND.muted()) toast('🔇 Sounds are muted – tap 🔊 to hear the birds', 2500);
+  else if (!SND.on(best.kind === 'nightjar' ? 'nightjar' : 'birds')) toast((best.kind === 'nightjar' ? '🌙 Nightjar' : '🐦 Birds') + ' sound is switched off in ⚙ Settings', 2500);
+  if (BIRDS.nj) { try { BIRDS.nj.src.stop(); } catch {} BIRDS.nj = null; }
+  callPlay(best.kind, best, false, true);
+  if (best.kind !== 'nightjar') startle(best, true);
+  return true;
 }
 // ---- nightjar call (your recording), placed at a nightjar on screen: pans with it, fades out as it leaves the view
 // ---- bird calls (your recordings). One call at a time; it comes from the bird's place on screen,
@@ -2249,9 +2262,11 @@ function callAllowed(kind) {
   return state.theme !== 'night' && !raining() && SND.on('birds') && fxOn();
 }
 function njAllowed() { return callAllowed('nightjar'); }
-async function callPlay(kind, bird, force) {
+async function callPlay(kind, bird, force, tapped) {
   if (BIRDS.nj || (!force && !callAllowed(kind))) return;
-  unlockAudio(); if (!actx || actx.state !== 'running') return;
+  unlockAudio(); if (!actx) return;
+  if (actx.state !== 'running') { try { await actx.resume(); } catch {} if (actx.state !== 'running') return; }
+  BIRDS.lastCall = Date.now();
   const buf = await callBuffer(kind); if (!buf || BIRDS.nj) return;
   const C = CALLS[kind], src = actx.createBufferSource(); src.buffer = buf;
   const g = actx.createGain(), pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
@@ -2285,14 +2300,14 @@ function njFollow() {                                       // follow the bird's
 }
 function njSchedule() {
   clearTimeout(BIRDS.njT);
-  BIRDS.njT = setTimeout(() => { njSchedule(); if (njAllowed() && (BIRDS.njVisible || raining())) njPlay(); }, (60 + Math.random() * 120) * 1000);
+  BIRDS.njT = setTimeout(() => { njSchedule(); if (njAllowed() && (BIRDS.njVisible || raining()) && Date.now() - (BIRDS.lastCall || 0) > 45000) njPlay(); }, (60 + Math.random() * 120) * 1000);
 }
 function dayCallSchedule() {                                // daytime: a bird on screen calls once in a while
   clearTimeout(BIRDS.dayT);
   BIRDS.dayT = setTimeout(() => {
     dayCallSchedule();
     const vis = BIRDS.list.filter(b => b.kind !== 'nightjar' && birdOnScreen(b));
-    if (!vis.length || !callAllowed('oriole')) return;
+    if (!vis.length || !callAllowed('oriole') || Date.now() - (BIRDS.lastCall || 0) < 45000) return;
     const b = vis[Math.floor(Math.random() * vis.length)];
     callPlay(b.kind, b);
   }, (30 + Math.random() * 60) * 1000);
@@ -2309,9 +2324,6 @@ map.on('sourcedata', e => { if (e.sourceId === 'openmaptiles' && e.isSourceLoade
 setInterval(() => { placeBirds(); }, 30000);               // theme / rain changes
 birdTick(); njSchedule();
 document.addEventListener('pointerdown', () => unlockAudio(), { once: true });
-let njFirst = setInterval(() => {                           // first nightjar call soon after they appear
-  if (BIRDS.njVisible && njAllowed()) { clearInterval(njFirst); setTimeout(() => njPlay(), 8000 + Math.random() * 12000); }
-}, 3000);
 function buzz(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
 async function keepAwake(on) {
   try {
