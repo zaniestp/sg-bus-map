@@ -173,12 +173,43 @@
   #testResult { font-size: 13px; margin-top: 8px; min-height: 18px; }
 
   #stopCard { position: fixed; top: calc(66px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 8; background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px 12px; max-height: 48vh; overflow-y: auto; }
+  #addrCard { position: fixed; top: calc(66px + env(safe-area-inset-top)); left: 10px; right: 10px; z-index: 8; background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px 12px; max-height: 40vh; overflow-y: auto; }
+  #addrCard .ad { padding: 8px 0; border-top: 1px solid rgba(127,127,127,.2); display: flex; gap: 10px; align-items: center; }
+  #addrCard .ad:first-of-type { border-top: 0; }
+  #addrCard .ad .at { flex: 1; font-size: 15px; line-height: 1.35; color: var(--ink); text-align: left; }
+  #addrCard .ad .at b { display: block; font-size: 16px; }
+  #addrCard .ad .at small { display: block; color: var(--muted); font-size: 13px; }
+  #addrCard .hd, #addrCard .note { color: var(--ink); }
+  #addrCard .hd { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 4px; }
+  #addrCard .hd span { flex: 1; }
+  #addrCard button { border: 0; border-radius: 10px; padding: 8px 10px; background: #e8eefc; color: #0d2c6c; font-weight: 700; font-size: 14px; }
+  body[data-theme="night"] #addrCard button { background: #24304a; color: #cfe0ff; }
   #stopCard .mine { background: #eef2ff; border-radius: 10px; padding: 8px 10px; margin: 6px 0; font-size: 14px; font-weight: 600; color: var(--blue); }
   body[data-theme="night"] #stopCard .mine { background: #1d2740; color: #a9c6ff; }
   #toast { position: fixed; left: 50%; top: calc(70px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 50; background: #222; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; }
   #toast.show { opacity: .95; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 60; background: rgba(255,255,255,.85); font-size: 16px; padding: 20px; text-align: center; }
   .maplibregl-ctrl-bottom-left { bottom: env(safe-area-inset-bottom); }
+  /* clean screen: only the map, buses and weather */
+  body.clean #topbar, body.clean #results, body.clean #routeBar, body.clean #wxChip, body.clean #bldgLegend, body.clean #legendChip,
+  body.clean #fabs > :not(#sndBtn), body.clean #panel, body.clean #stopCard, body.clean #addrCard, body.clean .maplibregl-ctrl-bottom-right,
+  body.clean .maplibregl-ctrl-bottom-left, body.clean .maplibregl-ctrl-top-right { display: none !important; }
+  #cleanExit { position: fixed; left: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 9; border: 0; border-radius: 999px; padding: 8px 14px;
+    background: rgba(0,0,0,.35); color: #fff; font-weight: 700; font-size: 14px; backdrop-filter: blur(4px); }
+  #legendChip { position: fixed; left: 10px; z-index: 4; border: 0; border-radius: 999px; width: 38px; height: 38px; background: var(--card); box-shadow: var(--shadow); font-size: 18px; }
+  #bldgLegend .lx { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--card); box-shadow: var(--shadow); color: var(--ink); font-size: 12px; line-height: 22px; padding: 0; }
+  #bldgLegend { position: fixed; }
+  #ltNote { position: fixed; left: 50%; transform: translateX(-50%); top: calc(112px + env(safe-area-inset-top)); z-index: 9; background: rgba(30,27,75,.92); color: #fef9c3;
+    border-radius: 999px; padding: 7px 14px; font-weight: 700; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.35); white-space: nowrap; }
+  body.clean #ltNote { top: calc(14px + env(safe-area-inset-top)); }
+  #settingsTitle { margin: 0 0 8px; font-size: 20px; user-select: none; -webkit-user-select: none; }
+  #creditBox .dlg { text-align: center; }
+  #creditBox .big { font-size: 22px; font-weight: 800; margin: 4px 0; }
+  #creditBox .ver { font-family: ui-monospace, monospace; font-size: 13px; background: rgba(127,127,127,.12); border-radius: 10px; padding: 8px; margin: 10px 0; line-height: 1.6; }
+  #creditBox small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  #sndBtn.off { opacity: .75; }
+  .sndrow { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+  #sndVol { width: 100%; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -186,7 +217,7 @@
 
 <div id="topbar">
   <form id="searchForm" autocomplete="off">
-    <input id="q" placeholder="Bus no., stop code, stop or road" aria-label="Search bus, stop code, stop name or road" enterkeyhint="search">
+    <input id="q" placeholder="Bus no., stop, road or postal code" aria-label="Search bus, stop code, stop name, road, postal code or block" enterkeyhint="search">
     <button type="submit">Go</button>
   </form>
   <div id="modeChip" hidden></div>
@@ -214,15 +245,22 @@
   <span data-cat="food" style="--c:#ff6b5b">Food</span><span data-cat="shop" style="--c:#ff9f1c">Shopping</span>
   <span data-cat="commercial" style="--c:#9b5de5">Commercial</span><span data-cat="residential" style="--c:#7fb2e5">Residential</span>
   <span data-cat="school" style="--c:#f472b6">School</span>
+  <button class="lx" id="legendX" aria-label="Hide legend">✕</button>
 </div>
 
 <div id="fabs">
   <button id="followBtn" class="iconbtn" hidden title="Follow bus">⌖</button>
+  <button id="sndBtn" class="iconbtn" hidden title="Trip sounds" aria-label="Mute trip sounds">🔊</button>
+  <button id="cleanBtn" class="iconbtn" title="Clean screen" aria-label="Clean screen">👁</button>
   <button id="locateBtn" class="iconbtn" title="My location">◎</button>
 </div>
+<button id="cleanExit" hidden aria-label="Show controls">👁 Show</button>
+<button id="legendChip" hidden title="Show colour legend" aria-label="Show colour legend">🎨</button>
+<div id="ltNote" hidden></div>
 
 <div id="panel" hidden></div>
 <div id="stopCard" hidden></div>
+<div id="addrCard" hidden></div>
 
 <div id="alertBox" hidden>
   <h2 id="alertTitle"></h2>
@@ -232,6 +270,7 @@
 
 <div id="settings" class="modal" hidden>
   <div class="dlg">
+    <h1 id="settingsTitle">⚙ Settings</h1>
     <h2>Live data proxy</h2>
     <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
     <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
@@ -259,6 +298,16 @@
       <option value="full">Full</option>
       <option value="off">Off</option>
     </select>
+    <button class="btn" id="ltTestBtn" style="margin-top:10px;width:100%">⚡ Test lightning flash</button>
+    <h2 style="margin-top:14px">Trip sounds</h2>
+    <div class="sndrow">
+      <label class="check"><input type="checkbox" id="sndBirds"> 🐦 Birds</label>
+      <label class="check"><input type="checkbox" id="sndBells"> 🔔 Bells</label>
+      <label class="check"><input type="checkbox" id="sndRain"> 🌧 Rain</label>
+      <label class="check"><input type="checkbox" id="sndThunder"> ⛈ Thunder</label>
+    </div>
+    <input type="range" id="sndVol" min="0" max="100" step="5" aria-label="Trip sound volume">
+    <button class="btn" id="sndPreview" style="margin-top:8px;width:100%">▶ Preview sounds</button>
     <div class="row">
       <button class="btn" id="testBtn">Test</button>
       <button class="btn" id="cancelBtn">Cancel</button>
@@ -278,11 +327,24 @@
   </div>
 </div>
 
+<div id="creditBox" class="modal" hidden>
+  <div class="dlg">
+    <div style="font-size:34px">🚌</div>
+    <div class="big">SG Bus Map</div>
+    <div>made by <b>zaniestp</b></div>
+    <div style="margin-top:6px"><a href="https://github.com/zaniestp/sg-bus-map" target="_blank" rel="noopener">github.com/zaniestp/sg-bus-map</a></div>
+    <div class="ver" id="creditVer"></div>
+    <small>Bus arrivals: LTA DataMall · Addresses: OneMap / SLA · Weather &amp; lightning: NEA (data.gov.sg) · Map: OpenFreeMap / © OpenStreetMap contributors · Bus routes: sgbusdata</small>
+    <div class="row" style="justify-content:center"><button class="btn primary" id="creditOk">✕ Close</button></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div id="loading">Loading bus data…</div>
 
 <script>
 // ======================= CONFIG =======================
+const APP_VERSION = '3.1', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -1029,7 +1091,7 @@ function setupBuildingColors() {
   // Building numbers: "Blk 524A" on homes, plain numbers elsewhere; homes win when labels would overlap
   map.addSource('bldg-labels', { type: 'geojson', data: emptyFC(), attribution: 'Block numbers © <a href="https://www.onemap.gov.sg/" target="_blank">OneMap</a> / SLA' });
   // other buildings' numbers give way to shop names; HDB "Blk" numbers always show and push shop icons aside
-  const lblLayout = overlap => ({ 'text-field': ['get', 'text'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 16.5, 13, 19, 16],
+  const lblLayout = overlap => ({ 'text-field': ['step', ['zoom'], ['get', 'text'], 18, ['case', ['!=', ['get', 'pc'], ''], ['concat', ['get', 'text'], '\n', ['get', 'pc']], ['get', 'text']]], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 16.5, 13, 19, 16],
               'symbol-sort-key': ['get', 'prio'], 'text-padding': 4, 'text-allow-overlap': overlap });
   const lblPaint = { 'text-color': ['get', 'tc'], 'text-halo-color': ['get', 'halo'], 'text-halo-width': 2.4 };
   map.addLayer({ id: 'bldg-labels-o', type: 'symbol', source: 'bldg-labels', minzoom: 16.5, filter: ['!=', ['get', 'res'], 1], layout: lblLayout(false), paint: lblPaint });
@@ -1087,6 +1149,27 @@ function inspectBuilding(point) {
     for (const j of cands) { const d = inRing(ref, list[j].xy) ? 0 : ringDist(ref, list[j].xy); if (d < bd) { bd = d; best = j; } }
     return best;
   };
+  let idx = pickBuilding(point, ground, near);
+  if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
+  BLDG.lastInspect = Date.now();
+  flashBuilding(idx);
+  const ad = BLDG.info.addr && BLDG.info.addr[idx], om = BLDG.info.om && BLDG.info.om[idx];
+  const fmt = a => (a.n && a.n !== 'NIL' && !/^HDB/.test(a.n) ? a.n + ' ' : '') + 'Blk ' + a.b + (a.p && a.p !== 'NIL' ? ' · ' + a.p : '') + (a.h ? ' (HDB)' : '');
+  let omTxt = om ? (om.length > 1 ? 'this shape covers ' + om.length + ' addresses: ' : 'OneMap: ') + om.map(fmt).join('; ')
+                 : (OM.off ? 'OneMap off' : 'OneMap: no number');
+  // nearest OneMap address to where the finger is (on the ground)
+  let nb = null, nd = Infinity;
+  for (const a of BLDG.info.omPts || []) { const q = toXY([a.lng, a.lat]), d = Math.hypot(q[0] - ground[0], q[1] - ground[1]); if (d < nd) { nd = d; nb = a; } }
+  const nearTxt = nb ? ' · nearest to finger: ' + fmt(nb) + ' · ' + Math.round(nd) + ' m' : '';
+  const partTxt = list[idx].multi ? ' · part ' + (list[idx].partNo + 1) + ' of a multi-part map building' : '';
+  toast('🏢 ' + parts[idx].why + partTxt + ' · ' + omTxt + nearTxt + ' · map: ' + (ad ? [...ad].join(', ') : 'no number') +
+        ' · points in view: OneMap ' + (BLDG.info.omCount || 0) + ', map ' + (BLDG.info.addrCount || 0) + ' · labels ' + ((state.bldgStats && state.bldgStats.labels) || 0), 10000);
+  return true;
+}
+// which building is under a screen point (topmost drawn building; for one map building with several parts, the part nearest the finger)
+function pickBuilding(point, ground, near) {
+  const { list, parts } = BLDG.info;
+  const ids = BLDG.layers.map(l => l.id).filter(id => map.getLayer(id)).concat(map.getLayer('bldg-color') ? ['bldg-color'] : []);
   let idx = -1;
   for (const box of [[point.x, point.y], [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]]]) {   // exact spot first
     let feats = [];
@@ -1103,28 +1186,98 @@ function inspectBuilding(point) {
     if (idx >= 0) break;
   }
   if (idx < 0) idx = near(list.map((x, j) => (!x.outline && parts[j].length) ? j : -1).filter(j => j >= 0 && ringDist(ground, list[j].xy) < 15), ground);
-  if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
+  return idx;
+}
+// ---------- address card: tap a building to see its full address ----------
+const titleCase = x => String(x || '').toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+function addrLines(a) {                    // → { main, sub, copy }
+  const name = a.n && a.n !== 'NIL' && !/^HDB/i.test(a.n) ? titleCase(a.n) : '';
+  const blk = a.b && a.b !== 'NIL' ? (a.h ? 'Blk ' : '') + a.b : '';
+  const street = [blk, titleCase(a.r)].filter(Boolean).join(' ');
+  const pc = a.p && a.p !== 'NIL' ? 'Singapore ' + a.p : 'Singapore';
+  return { main: name || street, sub: (name ? street + ', ' : '') + pc + (a.h ? ' · HDB' : ''), copy: [name, street, pc].filter(Boolean).join(', ') };
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  try { const ta = h('textarea', { style: 'position:fixed;opacity:0' }); ta.value = t; document.body.append(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch { return false; }
+}
+function closeAddrCard() { $('addrCard').hidden = true; $('addrCard').innerHTML = ''; }
+function openAddrCard(addrs, title) {
+  closeStopCard();
+  const box = $('addrCard'); box.innerHTML = '';
+  box.append(h('div', { class: 'hd' }, h('span', null, title || (addrs.length > 1 ? '🏢 ' + addrs.length + ' addresses in this building' : '🏢 Address')),
+    h('button', { onclick: closeAddrCard, 'aria-label': 'Close' }, '✕')));
+  for (const a of addrs) {
+    const L = addrLines(a);
+    const btn = h('button', { onclick: async () => { btn.textContent = (await copyText(L.copy)) ? '✓ Copied' : 'Copy failed'; setTimeout(() => btn.textContent = '📋 Copy', 1800); } }, '📋 Copy');
+    box.append(h('div', { class: 'ad' }, h('div', { class: 'at' }, h('b', null, L.main), h('small', null, L.sub)), btn));
+  }
+  box.hidden = false;
+}
+// a short tap on a building (not on a bus stop)
+function addrAt(point) {
+  if (!BLDG.on || !BLDG.info || map.getZoom() < 15.8 || Date.now() - (BLDG.lastInspect || 0) < 900) return false;
+  const { list } = BLDG.info, ground = toXY(map.unproject(point).toArray());
+  const near = (cands, ref) => { let best = -1, bd = Infinity; for (const j of cands) { const d = inRing(ref, list[j].xy) ? 0 : ringDist(ref, list[j].xy); if (d < bd) { bd = d; best = j; } } return best; };
+  const idx = pickBuilding(point, ground, near);
+  if (idx < 0) { closeAddrCard(); return false; }
   flashBuilding(idx);
-  const ad = BLDG.info.addr && BLDG.info.addr[idx], om = BLDG.info.om && BLDG.info.om[idx];
-  const fmt = a => (a.n && a.n !== 'NIL' && !/^HDB/.test(a.n) ? a.n + ' ' : '') + 'Blk ' + a.b + (a.p && a.p !== 'NIL' ? ' · ' + a.p : '') + (a.h ? ' (HDB)' : '');
-  let omTxt = om ? (om.length > 1 ? 'this shape covers ' + om.length + ' addresses: ' : 'OneMap: ') + om.map(fmt).join('; ')
-                 : (OM.off ? 'OneMap off' : 'OneMap: no number');
-  // nearest OneMap address to where the finger is (on the ground)
-  let nb = null, nd = Infinity;
-  for (const a of BLDG.info.omPts || []) { const q = toXY([a.lng, a.lat]), d = Math.hypot(q[0] - ground[0], q[1] - ground[1]); if (d < nd) { nd = d; nb = a; } }
-  const nearTxt = nb ? ' · nearest to finger: ' + fmt(nb) + ' · ' + Math.round(nd) + ' m' : '';
-  const partTxt = list[idx].multi ? ' · part ' + (list[idx].partNo + 1) + ' of a multi-part map building' : '';
-  toast('🏢 ' + parts[idx].why + partTxt + ' · ' + omTxt + nearTxt + ' · map: ' + (ad ? [...ad].join(', ') : 'no number') +
-        ' · points in view: OneMap ' + (BLDG.info.omCount || 0) + ', map ' + (BLDG.info.addrCount || 0) + ' · labels ' + ((state.bldgStats && state.bldgStats.labels) || 0), 10000);
+  const om = BLDG.info.om[idx], ad = BLDG.info.addr[idx];
+  if (om && om.length) openAddrCard(om);
+  else if (ad) openAddrCard([...ad].map(n => ({ b: n, r: '', p: '' })), '🏢 Map number only (no OneMap address)');
+  else openAddrCard([], OM.off ? '🏢 No address (OneMap not set up)' : '🏢 No address found for this building');
   return true;
 }
+// ---------- search OneMap for a postal code / block / building ----------
+const ADDR = { t: null, seq: 0, cache: new Map() };
+const looksLikeAddress = q => /^\d{6}$/.test(q) || /^blk\s*\d/i.test(q) || /^\d{1,4}[a-z]?\s+[a-z]{2,}/i.test(q);
+async function addrSearch(q) {
+  q = q.trim(); if (!API || q.length < 3) return [];
+  const k = q.toLowerCase();
+  if (ADDR.cache.has(k)) return ADDR.cache.get(k);
+  const r = await fetch(API + '/search?q=' + encodeURIComponent(q.replace(/^blk\s*/i, '')), { headers: apiHeaders() });
+  const d = await r.json().catch(() => ({}));
+  const res = r.ok && Array.isArray(d.results) ? d.results : [];
+  if (r.ok) ADDR.cache.set(k, res);
+  return res;
+}
+function scheduleAddrSearch(q) {
+  clearTimeout(ADDR.t); const my = ++ADDR.seq;
+  if (!looksLikeAddress(q.trim())) return;
+  ADDR.t = setTimeout(async () => {
+    let res = []; try { res = await addrSearch(q); } catch {}
+    if (my !== ADDR.seq || document.activeElement !== $('q')) return;
+    const box = $('results');
+    box.querySelectorAll('.addrres').forEach(x => x.remove());
+    if (!res.length) return;
+    const nores = box.querySelector('.note'); if (nores) nores.remove();
+    box.append(h('div', { class: 'reshead addrres' }, 'Addresses (OneMap)'));
+    for (const a of res.slice(0, 8)) { const L = addrLines(a);
+      box.append(h('div', { class: 'res addrres', onclick: () => { hideResults(); goToAddress(a); } },
+        h('span', { class: 'ic road' }, '🏢'), h('div', { class: 'tx' }, L.main, h('small', null, L.sub)))); }
+    box.hidden = false;
+  }, 450);
+}
+function goToAddress(a) {
+  $('q').value = addrLines(a).main;
+  map.flyTo({ center: [a.lng, a.lat], zoom: 18, pitch: Math.max(map.getPitch(), 45), duration: 1200 });
+  map.once('moveend', () => setTimeout(() => {          // wait for building colours/addresses of the new area
+    if (BLDG.on && BLDG.info && BLDG.info.list) {
+      const q = toXY([a.lng, a.lat]), { list, parts } = BLDG.info;
+      let idx = -1, bd = 30;
+      list.forEach((x, j) => { if (x.outline || !parts[j].length) return; const d = inRing(q, x.xy) ? 0 : ringDist(q, x.xy); if (d < bd) { bd = d; idx = j; } });
+      if (idx >= 0) flashBuilding(idx, 4000);
+    }
+    openAddrCard([a]);
+  }, 1200));
+}
 // show which building the long-press picked: a yellow glow for 2 seconds
-function flashBuilding(idx) {
+function flashBuilding(idx, ms = 2000) {
   const p = BLDG.info.list[idx], ps = BLDG.info.parts[idx]; if (!p || !ps.length) return;
   const src = map.getSource('bldg-flash'); if (!src) return;
   src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [inflateRing(p.xy, 0.8).map(toLL)] },
     properties: { b: ps[0].b, h: ps[ps.length - 1].h + 0.6 } }] });
-  clearTimeout(BLDG.flashT); BLDG.flashT = setTimeout(() => src.setData(emptyFC()), 2000);
+  clearTimeout(BLDG.flashT); BLDG.flashT = setTimeout(() => src.setData(emptyFC()), ms);
 }
 (() => {
   let timer = null, start = null;
@@ -1207,7 +1360,11 @@ function omPoints(W, E, S, N) {            // OneMap addresses already loaded in
   for (const v of OM.cells.values()) if (Array.isArray(v)) for (const a of v) if (a.lng >= W && a.lng <= E && a.lat >= S && a.lat <= N) out.push(a);
   return out;
 }
-function updateBldgLegend() { $('bldgLegend').hidden = !(BLDG.on && BLDG.ready && map.getZoom() >= 16); }
+function updateBldgLegend() {
+  const want = BLDG.on && BLDG.ready && map.getZoom() >= 16, off = store.get('legendOff') === '1';
+  $('bldgLegend').hidden = !want || off;
+  $('legendChip').hidden = !want || !off;
+}
 function scheduleBldg() { if (!BLDG.on || !BLDG.ready) return; clearTimeout(BLDG.timer); BLDG.timer = setTimeout(computeBldg, 350); }
 function tileFeatures(sl) {
   let f = [];
@@ -1259,8 +1416,20 @@ function computeBldg() {
       else if (area > g[same].area) g[same] = { f, xy, box, area, outline, gk };
     });
   }
-  const list = [];
-  for (const g of groups.values()) { g.forEach((p, k) => { p.multi = g.length > 1; p.partNo = k; list.push(p); }); }
+  // Pieces of the same building that touch are one block cut at a map-tile edge → join them into one "cluster".
+  const list = [], clu = [];
+  const fnd = i => clu[i] === i ? i : (clu[i] = fnd(clu[i]));
+  for (const g of groups.values()) {
+    const base = list.length;
+    g.forEach(p => { clu.push(list.length); list.push(p); });
+    for (let a = 0; a < g.length; a++) for (let b = a + 1; b < g.length; b++) {
+      const A = g[a].box, B = g[b].box, m = 1.5;
+      if (A[0] - m <= B[2] && B[0] - m <= A[2] && A[1] - m <= B[3] && B[1] - m <= A[3]) clu[fnd(base + b)] = fnd(base + a);
+    }
+    const roots = [...new Set(g.map((_, k) => fnd(base + k)))];
+    g.forEach((p, k) => { p.multi = roots.length > 1; p.partNo = roots.indexOf(fnd(base + k)); });
+  }
+  list.forEach((p, i) => { p.cl = fnd(i); });
   const blds = list.map(({ f, xy, outline }) => ({ ring: xy, outline, h: +(f.properties.render_height ?? f.properties.height ?? 10), b: +(f.properties.render_min_height ?? f.properties.min_height ?? 0) }));
   const landuse = [];
   for (const f of tileFeatures('landuse')) for (const r of outerRings(f.geometry)) landuse.push({ cls: f.properties.class, ring: r.map(toXY) });
@@ -1313,9 +1482,30 @@ function computeBldg() {
     if (i == null) continue;
     (BLDG.info.addr[i] ||= new Set()).add(String(hn));
   }
+  // pieces of one cluster share addresses and colours: the piece with an address (else the biggest) leads
+  const members = new Map();
+  list.forEach((p, i) => { if (!p.outline && parts[i].length) (members.get(p.cl) || members.set(p.cl, []).get(p.cl)).push(i); });
+  for (const ms of members.values()) {
+    if (ms.length < 2) { list[ms[0]].lead = true; continue; }
+    const om = [], ad = new Set();
+    for (const j of ms) { (BLDG.info.om[j] || []).forEach(a => om.includes(a) || om.push(a)); (BLDG.info.addr[j] || []).forEach(x => ad.add(x)); }
+    const lead = ms.slice().sort((a, b) => (BLDG.info.om[b] ? 1 : 0) - (BLDG.info.om[a] ? 1 : 0) || list[b].area - list[a].area)[0];
+    const rich = ms.slice().sort((a, b) => parts[b].length - parts[a].length || list[b].area - list[a].area)[0];   // keeps a shop/food band if any piece has one
+    const shared = parts[rich].map(x => ({ ...x }));
+    shared.why = parts[lead].why;
+    for (const j of ms) { parts[j] = shared; list[j].lead = j === lead; if (om.length) BLDG.info.om[j] = om; if (ad.size) BLDG.info.addr[j] = ad; }
+  }
   // OneMap says HDB → residential (keeping a shop/food band at the bottom)
   const body0 = ps => ps[ps.length - 1].cat;
-  list.forEach((_, i) => { const om = BLDG.info.om[i]; if (om && om.some(a => a.h) && parts[i].length && body0(parts[i]) !== 'school') parts[i] = hdbParts(parts[i]); });
+  const done = new Set();
+  list.forEach((_, i) => {
+    const om = BLDG.info.om[i]; if (done.has(parts[i])) return;
+    if (om && om.some(a => a.h) && parts[i].length && body0(parts[i]) !== 'school') {
+      const before = parts[i], after = hdbParts(before);
+      list.forEach((_, j) => { if (parts[j] === before) parts[j] = after; });
+      done.add(after);
+    }
+  });
 
   // ---- colours
   const feats = [], cats = {}, src = map.getSource('openmaptiles'), gj = src.type === 'geojson';
@@ -1358,7 +1548,7 @@ function computeBldg() {
   // ---- building numbers, placed in the middle of each building (OneMap first, else the map's own number)
   const night = state.theme === 'night', labels = [];
   list.forEach((p, i) => {
-    if (p.outline || !parts[i].length) return;
+    if (p.outline || !parts[i].length || !p.lead) return;
     const om = BLDG.info.om[i], ad = BLDG.info.addr[i];
     const nums = om ? [...new Set(om.map(a => a.b))] : ad ? [...ad] : null;
     if (!nums) return;
@@ -1369,7 +1559,7 @@ function computeBldg() {
     const lightTxt = { residential: '#bfdbfe', food: '#fecaca', shop: '#fed7aa', commercial: '#ddd6fe', school: '#fbcfe8', other: '#e5e7eb' }[cat] || '#e5e7eb';
     const txt = nums.slice(0, 3).join(' / ');
     labels.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(c) }, properties: {
-      text: cat === 'residential' ? 'Blk ' + txt : txt, cat, prio: cat === 'residential' ? 0 : 1, res: cat === 'residential' ? 1 : 0,
+      text: cat === 'residential' ? 'Blk ' + txt : txt, pc: om ? [...new Set(om.map(a => a.p).filter(x => x && x !== 'NIL'))].slice(0, 2).join(' / ') : '', cat, prio: cat === 'residential' ? 0 : 1, res: cat === 'residential' ? 1 : 0,
       tc: night ? lightTxt : dark, halo: night ? '#0b1220' : '#ffffff' } });
   });
   map.getSource('bldg-labels').setData({ type: 'FeatureCollection', features: labels });
@@ -1414,6 +1604,7 @@ function placeChips() {
   $('wxChip').style.top = top + 'px';
   const p = $('panel');
   $('bldgLegend').style.bottom = (p.hidden ? 24 : p.offsetHeight + 12) + 'px';
+  $('legendChip').style.bottom = $('bldgLegend').style.bottom;
 }
 function applyWeatherMode() {
   const cv = $('wx');
@@ -1435,12 +1626,14 @@ function wxResize() {
 window.addEventListener('resize', wxResize);
 function wxFrame(ts) {
   WX.raf = null;
-  if (WX.mode === 'off') return;
+  const realOn = LT.flash > 0 || LT.queue.length > 0 || LT.wait;
+  if (WX.mode === 'off' && !realOn) { $('wx').hidden = true; return; }
   WX.raf = requestAnimationFrame(wxFrame);
   if (document.hidden || ts - WX.last < 40) return;          // ~25 fps
   const dt = Math.min(0.1, (ts - WX.last) / 1000); WX.last = ts;
   const cv = $('wx'); if (!WX.dpr || cv.width !== Math.round(innerWidth * WX.dpr)) wxResize();
   const g = cv.getContext('2d'), Wd = cv.width, Ht = cv.height, s = WX.dpr;
+  if (WX.mode === 'off') { cv.hidden = false; g.clearRect(0, 0, Wd, Ht); ltDraw(g, Wd, Ht, s, dt, 1); return; }
   if (WX.mode === 'preview' && ts - WX.previewAt > 6000) {
     WX.previewAt = ts; const [e, l] = WX_PREVIEW[WX.previewIdx++ % WX_PREVIEW.length]; WX.effect = e; WX.label = l; updateWxChip();
   }
@@ -1487,7 +1680,90 @@ function wxFrame(ts) {
     if (WX.flash <= 0 && Math.random() < 0.004) WX.flash = 1;
     if (WX.flash > 0) { g.fillStyle = `rgba(255,255,255,${0.55 * WX.flash})`; g.fillRect(0, 0, Wd, Ht); WX.flash -= dt * 4; }
   }
+  ltDraw(g, Wd, Ht, s, dt, dim);
   g.globalAlpha = 1;
+}
+// ---------- real lightning (NEA Lightning Detection System, via the Worker's /lightning) ----------
+const LT = { seen: new Set(), flash: 0, bolt: null, queue: [], timer: null, noteT: null, RANGE_KM: 10, MAX_AGE_MIN: 15 };
+function ltDraw(g, Wd, Ht, s, dt, dim) {                 // white flash + a jagged bolt towards the strike
+  if (!(LT.flash > 0)) { if (LT.queue.length && !LT.wait) ltNext(); return; }
+  const a = Math.max(0, LT.flash) * LT.bolt.k;
+  const flick = LT.flash > 0.75 || (LT.flash > 0.35 && LT.flash < 0.5) ? 1 : 0.45;   // double flicker like real lightning
+  g.globalAlpha = dim;
+  const night = state.theme === 'night';
+  g.fillStyle = night ? `rgba(225,232,255,${0.6 * a * flick})` : `rgba(190,200,255,${0.45 * a * flick})`; g.fillRect(0, 0, Wd, Ht);
+  const line = (path, w, col) => { g.strokeStyle = col; g.lineWidth = w * s; g.lineJoin = 'round'; g.beginPath(); path.forEach(([x, y], i) => i ? g.lineTo(x * Wd, y * Ht) : g.moveTo(x * Wd, y * Ht)); g.stroke(); };
+  const A = Math.min(1, 1.4 * a);
+  for (const [k, path] of [[1, LT.bolt.main], [0.55, LT.bolt.fork]]) {
+    if (!path || path.length < 2) continue;
+    g.shadowColor = '#a78bfa'; g.shadowBlur = 22 * s;
+    line(path, 10 * k, `rgba(109,40,217,${0.55 * A})`);      // violet glow – visible on light maps too
+    g.shadowBlur = 0;
+    line(path, 3.4 * k, `rgba(255,255,245,${A})`);             // white-hot core
+  }
+  g.shadowBlur = 0; g.globalAlpha = 1;
+  LT.flash -= dt * 1.6;
+  if (LT.flash <= 0) { LT.wait = true; setTimeout(() => { LT.wait = false; }, 700); }
+}
+function ltBoltPath(x0, y1) {                             // from the top of the screen down to the strike side
+  const pts = [[x0, 0]]; let x = x0, y = 0;
+  while (y < y1) { y += 0.04 + Math.random() * 0.06; x += (Math.random() - 0.5) * 0.08; pts.push([Math.min(0.98, Math.max(0.02, x)), Math.min(y, y1)]); }
+  return pts;
+}
+function ltNext() {
+  const st = LT.queue.shift(); if (!st) return;
+  const onTrip = state.mode === 'onboard';
+  if (onTrip && WX.trip === 'off') return;
+  // where is the strike on screen? (clamped to the edge when it's off-screen)
+  let sx = 0.5, sy = 0.6;
+  try { const p = map.project([st.lng, st.lat]); sx = p.x / innerWidth; sy = p.y / innerHeight; } catch {}
+  sx = Math.min(0.92, Math.max(0.08, sx)); sy = Math.min(0.85, Math.max(0.3, sy));
+  const main = ltBoltPath(sx + (Math.random() - 0.5) * 0.1, sy);
+  const k0 = Math.floor(main.length * (0.3 + Math.random() * 0.3));
+  const fork = ltBoltPath(main[k0][0], Math.min(0.95, main[k0][1] + 0.25)).map(([x, y]) => [x + (x - main[k0][0]) * 0.8, y + main[k0][1]]).filter(([, y]) => y <= 1);
+  LT.bolt = { main, fork, k: Math.max(0.45, 1 - st.km / LT.RANGE_KM * 0.55) };   // closer = brighter
+  LT.flash = 1;
+  const cv = $('wx'); cv.hidden = false; if (!WX.raf) { WX.last = performance.now(); WX.raf = requestAnimationFrame(wxFrame); }
+  if (navigator.vibrate) navigator.vibrate([30, 60, 140]);
+  sndThunder(Math.min(8, 1.5 + st.km * 0.8), Math.max(0.4, 1 - st.km / 12));   // sound travels ~3 s per km; kept shorter so it feels connected
+}
+function ltBearing(lat1, lng1, lat2, lng2) {
+  const dx = (lng2 - lng1) * Math.cos(lat1 * Math.PI / 180), dy = lat2 - lat1;
+  return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360 / 45) % 8];
+}
+function ltNote(text) {
+  const n = $('ltNote'); n.textContent = text; n.hidden = false;
+  clearTimeout(LT.noteT); LT.noteT = setTimeout(() => { n.hidden = true; }, 8000);
+}
+function ltStrikes(strikes, test) {                       // new strikes near the map centre → flash + note
+  const c = map.getCenter(), now = Date.now(), fresh = [];
+  for (const st of strikes) {
+    const id = st.t + '|' + st.lat.toFixed(4) + ',' + st.lng.toFixed(4);
+    if (LT.seen.has(id)) continue; LT.seen.add(id);
+    const km = Math.hypot((st.lng - c.lng) * 111.32 * Math.cos(c.lat * Math.PI / 180), (st.lat - c.lat) * 110.57);
+    if (km > LT.RANGE_KM || (!test && now - st.t > LT.MAX_AGE_MIN * 60000)) continue;
+    fresh.push({ ...st, km });
+  }
+  if (LT.seen.size > 3000) LT.seen = new Set([...LT.seen].slice(-1000));
+  if (!fresh.length) return 0;
+  fresh.sort((a, b) => a.km - b.km);
+  const near = fresh[0], mins = Math.max(0, Math.round((now - near.t) / 60000));
+  ltNote('⚡ Lightning ' + (near.km < 1 ? 'under 1 km' : near.km.toFixed(near.km < 3 ? 1 : 0) + ' km ' + ltBearing(c.lat, c.lng, near.lat, near.lng)) +
+         ' · ' + (test ? 'test' : mins ? mins + ' min ago' : 'just now') + (fresh.length > 1 ? ' · ' + fresh.length + ' strikes' : ''));
+  for (const st of fresh.slice(0, 3)) LT.queue.push(st);         // at most 3 flashes per update
+  if (!(LT.flash > 0) && !LT.wait) ltNext();
+  return fresh.length;
+}
+async function ltPoll() {
+  if (WX.mode !== 'live' || !API || document.hidden) return;
+  try { const d = await api('/lightning'); if (d && Array.isArray(d.strikes)) ltStrikes(d.strikes); } catch {}
+}
+setInterval(ltPoll, 150000);                             // every 2½ minutes, like NEA's own updates
+setTimeout(ltPoll, 4000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) ltPoll(); });
+function ltTest() {
+  const c = map.getCenter();
+  ltStrikes([{ lat: c.lat + 0.02, lng: c.lng + 0.02, t: Date.now(), type: 'G' }], true);   // about 3 km NE
 }
 
 // ======================= time-of-day theme =======================
@@ -1685,6 +1961,7 @@ let actx = null;
 function unlockAudio() { try { actx ||= new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {} }
 function beep(n = 2) {
   if (!actx) return;
+  if (typeof sndDuck === 'function' && SND.ready) sndDuck(3 + n * 0.5);
   for (let i = 0; i < n; i++) {
     const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.4;
     o.frequency.value = i % 2 ? 660 : 880; o.type = 'sine';
@@ -1692,6 +1969,126 @@ function beep(n = 2) {
     o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.32);
   }
 }
+// ======================= trip ambience: birds / crickets, bells, rain, thunder =======================
+// All sounds are made live with Web Audio – no sound files. Plays only on a trip (or Preview), never louder than alerts.
+const SND = {
+  on: k => store.get('snd_' + k) !== '0',                 // birds, bells, rain, thunder – all on unless switched off
+  muted: () => store.get('sndMute') === '1',
+  vol: () => { const v = Number(store.get('sndVol')); return isFinite(v) && store.get('sndVol') !== null ? v / 100 : 0.5; },
+  ready: false, playing: false, preview: 0, timers: {}, noise: null, rainLvl: 0, duckUntil: 0
+};
+function sndInit() {
+  unlockAudio(); if (!actx || SND.ready) return !!actx;
+  const A = actx;
+  SND.master = A.createGain(); SND.master.gain.value = 0; SND.master.connect(A.destination);
+  // a little echo gives birds and bells some space
+  SND.fx = A.createGain(); const dl = A.createDelay(1), fb = A.createGain(), lp = A.createBiquadFilter();
+  dl.delayTime.value = 0.27; fb.gain.value = 0.32; lp.type = 'lowpass'; lp.frequency.value = 3200;
+  SND.fx.connect(SND.master); SND.fx.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(SND.master);
+  // looped noise for rain and thunder
+  const len = A.sampleRate * 2, buf = A.createBuffer(1, len, A.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  SND.noise = buf;
+  const src = A.createBufferSource(); src.buffer = buf; src.loop = true;
+  const hp = A.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 400;
+  const lp2 = A.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 6000;
+  SND.rain = A.createGain(); SND.rain.gain.value = 0;
+  src.connect(hp); hp.connect(lp2); lp2.connect(SND.rain); SND.rain.connect(SND.master); src.start();
+  SND.rainLp = lp2;
+  SND.ready = true; return true;
+}
+const rnd = (a, b) => a + Math.random() * (b - a);
+function sndBird() {                                       // one short phrase from one of three "species"
+  const A = actx, t0 = A.currentTime + 0.02, kind = Math.floor(Math.random() * 3), pan = A.createStereoPanner ? A.createStereoPanner() : null;
+  const out = A.createGain(); out.gain.value = 0.16;
+  if (pan) { pan.pan.value = rnd(-0.8, 0.8); out.connect(pan); pan.connect(SND.fx); } else out.connect(SND.fx);
+  const notes = kind === 0 ? Math.floor(rnd(2, 5)) : kind === 1 ? Math.floor(rnd(5, 10)) : 2;
+  let t = t0;
+  for (let i = 0; i < notes; i++) {
+    const o = A.createOscillator(), g = A.createGain(); o.type = 'sine';
+    const f0 = kind === 2 ? (i ? 2600 : 3400) : rnd(2800, 4800), dur = kind === 1 ? rnd(0.035, 0.06) : kind === 2 ? 0.28 : rnd(0.07, 0.14);
+    o.frequency.setValueAtTime(f0, t);
+    if (kind === 0) o.frequency.exponentialRampToValueAtTime(f0 * rnd(1.3, 1.7), t + dur);        // rising chirp
+    else if (kind === 1) o.frequency.exponentialRampToValueAtTime(f0 * rnd(0.7, 0.85), t + dur);  // quick falling trill
+    else { o.frequency.exponentialRampToValueAtTime(f0 * 0.92, t + dur); }                          // two-note whistle
+    const fm = A.createOscillator(), fg = A.createGain(); fm.frequency.value = rnd(25, 60); fg.gain.value = kind === 1 ? 180 : 60;
+    fm.connect(fg); fg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(out); o.start(t); fm.start(t); o.stop(t + dur + 0.02); fm.stop(t + dur + 0.02);
+    t += dur + (kind === 1 ? 0.025 : kind === 2 ? 0.12 : rnd(0.06, 0.16));
+  }
+}
+function sndCricket() {                                    // night: soft cricket pulses
+  const A = actx, t0 = A.currentTime + 0.02, f = rnd(4300, 4900), out = A.createGain(); out.gain.value = 0.05; out.connect(SND.fx);
+  const pulses = Math.floor(rnd(2, 5));
+  for (let p = 0; p < pulses; p++) {
+    const t = t0 + p * 0.32, o = A.createOscillator(), g = A.createGain(), am = A.createOscillator(), ag = A.createGain();
+    o.frequency.value = f; am.frequency.value = rnd(28, 40); ag.gain.value = 0.5; am.connect(ag); ag.connect(g.gain);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.16);
+    o.connect(g); g.connect(out); o.start(t); am.start(t); o.stop(t + 0.18); am.stop(t + 0.18);
+  }
+}
+const BELL_NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.5];   // C major pentatonic – any order sounds calm
+function sndBell() {
+  const A = actx, n = Math.random() < 0.35 ? 2 : 1;
+  for (let k = 0; k < n; k++) {
+    const t = A.currentTime + 0.02 + k * rnd(0.35, 0.7), f = BELL_NOTES[Math.floor(Math.random() * BELL_NOTES.length)];
+    const out = A.createGain(); out.gain.value = 0.09; out.connect(SND.fx);
+    for (const [ratio, amp, dec] of [[1, 1, 3.2], [2.76, 0.35, 1.6], [5.4, 0.18, 0.8], [2, 0.25, 2.2]]) {   // bell-like partials
+      const o = A.createOscillator(), g = A.createGain(); o.type = 'sine'; o.frequency.value = f * ratio;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(amp, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t + dec + 0.05);
+    }
+  }
+}
+function sndThunder(delaySec = 3, strength = 1) {
+  if (!SND.playing || !SND.on('thunder') || !SND.noise) return;
+  const A = actx, t = A.currentTime + delaySec, dur = rnd(3, 5);
+  const src = A.createBufferSource(); src.buffer = SND.noise; src.loop = true;
+  const lp = A.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; lp.Q.value = 0.7;
+  const g = A.createGain(), peak = 0.9 * strength;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.25);
+  for (let i = 1; i < 6; i++) g.gain.linearRampToValueAtTime(peak * rnd(0.35, 0.9) * (1 - i / 7), t + 0.25 + i * dur / 7);   // rolling rumble
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(lp); lp.connect(g); g.connect(SND.master); src.start(t); src.stop(t + dur + 0.1);
+}
+function sndLoop(name, fn, minS, maxS) {                   // keep calling fn at random gaps while playing
+  clearTimeout(SND.timers[name]);
+  const next = () => { SND.timers[name] = setTimeout(() => { if (SND.playing) { try { fn(); } catch {} } next(); }, rnd(minS, maxS) * 1000); };
+  next();
+}
+function sndDuck(sec = 4) { SND.duckUntil = Date.now() + sec * 1000; sndUpdate(); }   // stop alerts: ambience dips
+function sndUpdate() {
+  const onTrip = state.mode === 'onboard' && !!state.trip;
+  const want = !document.hidden && (SND.preview > Date.now() || (onTrip && !SND.muted()));
+  $('sndBtn').hidden = !onTrip;
+  $('sndBtn').textContent = SND.muted() ? '🔇' : '🔊'; $('sndBtn').classList.toggle('off', SND.muted());
+  $('sndBtn').setAttribute('aria-label', SND.muted() ? 'Unmute trip sounds' : 'Mute trip sounds');
+  if (!want && !SND.ready) return;
+  if (want && !sndInit()) return;
+  const A = actx, now = A.currentTime;
+  if (want && !SND.playing) {
+    SND.playing = true;
+    sndLoop('bird', () => {
+      if (!SND.on('birds')) return;
+      if (state.theme === 'night') sndCricket(); else sndBird();
+    }, 2.5, 7);
+    sndLoop('bell', () => { if (SND.on('bells')) sndBell(); }, 10, 25);
+  }
+  if (!want && SND.playing) { SND.playing = false; Object.values(SND.timers).forEach(clearTimeout); }
+  // volume: fade in/out, dip while an alert sounds
+  const ducked = Date.now() < SND.duckUntil;
+  SND.master.gain.cancelScheduledValues(now);
+  SND.master.gain.setTargetAtTime(want ? SND.vol() * (ducked ? 0.15 : 1) : 0, now, want ? (ducked ? 0.1 : 1.2) : 0.6);
+  if (ducked) { clearTimeout(SND.timers.duck); SND.timers.duck = setTimeout(sndUpdate, SND.duckUntil - Date.now() + 50); }
+  // rain follows the weather on the map
+  const weatherShown = WX.mode !== 'off' && !(onTrip && WX.trip === 'off');
+  const lvl = !SND.on('rain') ? 0 : SND.preview > Date.now() ? 0.45 : !weatherShown ? 0 : ({ rain: 0.25, heavy: 0.5, storm: 0.6 })[WX.effect] || 0;
+  SND.rain.gain.setTargetAtTime(lvl * 0.5, now, 2.5);
+  SND.rainLp.frequency.setTargetAtTime(lvl > 0.4 ? 7000 : 4500, now, 2);
+}
+setInterval(sndUpdate, 2000);
+document.addEventListener('visibilitychange', sndUpdate);
 function buzz(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
 async function keepAwake(on) {
   try {
@@ -1838,7 +2235,8 @@ function onMapClick(e) {
   const p = e.point, pad = 14;
   const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops', 'opp-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
-  if (!feats.length) return;
+  if (!feats.length) { addrAt(p); return; }
+  closeAddrCard();
   const f = feats[0].properties;
   if (state.mode === 'browse') return openStop(f.code);
   if ((state.mode === 'onboard' && state.trip) || (state.mode === 'waiting' && state.wait))
@@ -1849,6 +2247,7 @@ function onMapClick(e) {
 const card = { code: null, idx: null, timer: null };
 function closeStopCard() { clearInterval(card.timer); card.timer = null; card.code = null; $('stopCard').hidden = true; $('stopCard').innerHTML = ''; }
 function openStopCard(code, idx) {
+  closeAddrCard();
   const st = state.stops[code]; if (!st) return;
   clearInterval(card.timer);
   card.code = code; card.idx = idx;
@@ -2211,7 +2610,7 @@ function showRoad(rd) {
       h('div', { class: 'nm' }, x.st[2], h('small', null, x.code + ' · ' + (state.stopServices[x.code] || []).join(', '))),
       h('span', { class: 'meta' }, fmtDist(x.d))))));
 }
-$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) renderResults(runSearch($('q').value)); }, 120); });
+$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) { renderResults(runSearch($('q').value)); scheduleAddrSearch($('q').value); } }, 120); });
 $('q').addEventListener('focus', () => { if ($('q').value.trim()) renderResults(runSearch($('q').value)); });
 $('q').addEventListener('keydown', e => { if (e.key === 'Escape') hideResults(); });
 map.on('movestart', e => { if (e.originalEvent) $('results').hidden = true; });
@@ -2222,6 +2621,10 @@ $('searchForm').addEventListener('submit', e => {
   const qu = v.toUpperCase();
   if (state.services[qu]) { hideResults(); return showService(qu, 0); }
   if (state.stops[v]) { hideResults(); return goToStop(v); }
+  if (/^\d{6}$/.test(v)) {                             // postal code → straight to the building
+    addrSearch(v).then(res => { if (res.length) { hideResults(); goToAddress(res[0]); } else toast('No address found for ' + v); }).catch(() => toast('Address search not available'));
+    return;
+  }
   const r = runSearch(v);
   if (r && r.svcs.length + r.stops.length + r.roads.length === 1) {
     hideResults();
@@ -2859,6 +3262,7 @@ $('restartBtn').onclick = confirmRestart;
 $('restartNo').onclick = () => $('confirmRestart').hidden = true;
 $('restartYes').onclick = () => { $('confirmRestart').hidden = true; resetAll(); };
 function resetAll() {
+  closeAddrCard();
   setPoll(null);
   stopTrip();
   state.setup = state.wait = state.arrived = null;
@@ -2871,7 +3275,59 @@ function resetAll() {
   toast('Restarted');
 }
 
-$('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; $('settings').hidden = false; };
+// ---- trip sounds
+$('sndBtn').onclick = () => {
+  const m = !SND.muted(); store.set('sndMute', m ? '1' : '0'); sndUpdate();
+  if (!m) { unlockAudio(); if (!store.get('sndHint')) { store.set('sndHint', '1'); toast('🔊 Trip sounds on. No sound? Check media volume – on iPhone also switch off silent mode.', 5000); } }
+  else toast('🔇 Trip sounds muted');
+};
+for (const k of ['Birds', 'Bells', 'Rain', 'Thunder']) $('snd' + k).onchange = e => { store.set('snd_' + k.toLowerCase(), e.target.checked ? '1' : '0'); sndUpdate(); };
+$('sndVol').oninput = e => { store.set('sndVol', e.target.value); sndUpdate(); };
+$('sndPreview').onclick = () => {
+  if (SND.preview > Date.now()) { SND.preview = 0; $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); return; }
+  SND.preview = Date.now() + 20000; sndUpdate(); $('sndPreview').textContent = '■ Stop preview';
+  setTimeout(() => { try { if (SND.on('birds')) state.theme === 'night' ? sndCricket() : sndBird(); } catch {} }, 600);
+  setTimeout(() => { try { if (SND.on('bells')) sndBell(); } catch {} }, 1800);
+  setTimeout(() => sndThunder(0, 0.8), 6000);
+  setTimeout(() => { if (SND.preview <= Date.now()) { $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); } }, 20200);
+};
+// ---- clean screen
+function setClean(on) {
+  document.body.classList.toggle('clean', on);
+  $('cleanExit').hidden = !on;
+  if (on) { $('q').blur(); hideResults(); toast('Clean screen – tap 👁 Show or double-tap the map to bring controls back', 3500); }
+  else placeChips();
+}
+$('cleanBtn').onclick = () => setClean(true);
+$('cleanExit').onclick = () => setClean(false);
+map.on('dblclick', e => { if (document.body.classList.contains('clean')) { e.preventDefault(); setClean(false); } });
+// ---- legend hide / show
+$('legendX').onclick = () => { store.set('legendOff', '1'); updateBldgLegend(); };
+$('legendChip').onclick = () => { store.set('legendOff', '0'); updateBldgLegend(); };
+// ---- hidden credits: tap the Settings title 5 times
+(() => {
+  let taps = [];
+  $('settingsTitle').addEventListener('click', () => {
+    const now = Date.now(); taps = taps.filter(t => now - t < 2500); taps.push(now);
+    if (taps.length >= 5) { taps = []; openCredits(); }
+  });
+})();
+async function openCredits() {
+  const v = $('creditVer');
+  v.innerHTML = '';
+  v.append(h('div', null, 'App v' + APP_VERSION + ' · ' + APP_DATE), h('div', { id: 'creditWorker' }, 'Worker: checking…'));
+  $('creditBox').hidden = false;
+  try {
+    const r = await fetch(API + '/health'); const d = await r.json();
+    $('creditWorker').textContent = 'Worker v' + (d.version ?? '?') + (d.ok ? ' · online' : '');
+  } catch { $('creditWorker').textContent = 'Worker: not reachable'; }
+}
+$('creditOk').onclick = () => { $('creditBox').hidden = true; };
+$('creditBox').addEventListener('click', e => { if (e.target === $('creditBox')) $('creditBox').hidden = true; });
+$('ltTestBtn').onclick = () => { $('settings').hidden = true; setTimeout(ltTest, 300); };
+$('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Birds', 'Bells', 'Rain', 'Thunder']) $('snd' + k).checked = SND.on(k.toLowerCase());
+  $('sndVol').value = Math.round(SND.vol() * 100);
+  $('settings').hidden = false; };
 $('themeSel').onchange = () => { store.set('theme', $('themeSel').value); refreshTheme(true); };
 $('bldgChk').onchange = () => { BLDG.on = $('bldgChk').checked; store.set('bldgColor', BLDG.on ? '1' : '0'); applyBldgMode(); };
 $('wxSel').onchange = () => { WX.mode = $('wxSel').value; store.set('wxMode', WX.mode); applyWeatherMode(); };
