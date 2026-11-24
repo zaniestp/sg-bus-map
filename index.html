@@ -348,7 +348,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.6', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '3.7', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -356,10 +356,16 @@ const DATA_BASES = [
   'https://cdn.jsdelivr.net/gh/cheeaun/sgbusdata@main/data/v1/',
   'https://raw.githubusercontent.com/cheeaun/sgbusdata/main/data/v1/'
 ];
+const ROUTE_W = {
+  normal: ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 2, 3.5], 17, ['match', ['get', 'leg'], 'opp', 6, 10]],
+  casing: ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 4, 6], 17, ['match', ['get', 'leg'], 'opp', 10, 16]],
+  casingOnboard: ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 4, 5], 17, ['match', ['get', 'leg'], 'opp', 7, 9]],
+  onboard: ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 2, 3], 17, ['match', ['get', 'leg'], 'opp', 4, 6]]   // thinner: your bus sits on top
+};
 const COLORS = {
   // Bus colours: on board = light purple · closest to your tracked/tapped stop = green ·
   // other buses = red · just browsing (no stop selected) = light red
-  mine: { body: '#c4b5fd', roof: '#ede9fe', text: '#3b0764' },
+  mine: { body: '#8b5cf6', roof: '#c4b5fd', text: '#ffffff' },        // bright violet with a lavender roof – stands out on the route line
   near: { body: '#22c55e', roof: '#bbf7d0', text: '#052e16' },
   other: { body: '#dc2626', roof: '#f87171', text: '#ffffff' },
   light: { body: '#f87171', roof: '#fecaca', text: '#450a0a' },
@@ -571,7 +577,8 @@ function laneXY(R, ch, lane = LANE_M) {
   return [c[0] - Math.cos(th) * lane, c[1] + Math.sin(th) * lane];
 }
 function busParts(R, ch, o) {
-  const L = o.bendy ? 18 : 12, W = 2.55, hl = L / 2, hw = W / 2;
+  const k = o.scale || 1;                          // your own bus is drawn bigger
+  const L = (o.bendy ? 18 : 12) * k, W = 2.55 * k, hl = L / 2, hw = W / 2;
   const cch = ch - hl + 0.5;
   const th = headingAt(R, cch, 8);
   const f = [Math.sin(th), Math.cos(th)], r = [Math.cos(th), -Math.sin(th)];
@@ -580,17 +587,17 @@ function busParts(R, ch, o) {
     [[a0, b0], [a1, b0], [a1, b1], [a0, b1]].map(([a, b]) => [c[0] + f[0] * a + r[0] * b, c[1] + f[1] * a + r[1] * b]),
     base, top, color);
   const body = o.color, roof = o.roof, glass = '#1d262d';
-  const out = [box(-hl, hl, -hw, hw, 0.35, 1.2, body)];
+  const out = [box(-hl, hl, -hw, hw, 0.35 * k, 1.2 * k, body)];
   if (o.dd) {
-    out.push(box(-hl, hl, -hw, hw, 1.2, 2.3, glass), box(-hl, hl, -hw, hw, 2.3, 2.75, body),
-             box(-hl, hl, -hw, hw, 2.75, 3.95, glass), box(-hl, hl - 0.35, -hw, hw, 3.95, 4.35, roof));
+    out.push(box(-hl, hl, -hw, hw, 1.2 * k, 2.3 * k, glass), box(-hl, hl, -hw, hw, 2.3 * k, 2.75 * k, body),
+             box(-hl, hl, -hw, hw, 2.75 * k, 3.95 * k, glass), box(-hl, hl - 0.35 * k, -hw, hw, 3.95 * k, 4.35 * k, roof));
   } else {
-    out.push(box(-hl, hl, -hw, hw, 1.2, 2.6, glass), box(-hl, hl - 0.4, -hw, hw, 2.6, 3.05, roof));
+    out.push(box(-hl, hl, -hw, hw, 1.2 * k, 2.6 * k, glass), box(-hl, hl - 0.4 * k, -hw, hw, 2.6 * k, 3.05 * k, roof));
   }
-  out.push(box(hl - 0.1, hl + 0.08, -hw + 0.25, hw - 0.25, 0.5, 0.95, '#ffd54f'));   // headlight bar
-  for (const a of [-hl + 2.3, hl - 2.6]) {
-    out.push(box(a - 0.55, a + 0.55, hw - 0.05, hw + 0.12, 0, 0.75, '#111'));
-    out.push(box(a - 0.55, a + 0.55, -hw - 0.12, -hw + 0.05, 0, 0.75, '#111'));
+  out.push(box(hl - 0.1 * k, hl + 0.08 * k, -hw + 0.25 * k, hw - 0.25 * k, 0.5 * k, 0.95 * k, '#ffd54f'));   // headlight bar
+  for (const a of [-hl + 2.3 * k, hl - 2.6 * k]) {
+    out.push(box(a - 0.55 * k, a + 0.55 * k, hw - 0.05, hw + 0.12 * k, 0 * k, 0.75 * k, '#111'));
+    out.push(box(a - 0.55 * k, a + 0.55 * k, -hw - 0.12 * k, -hw + 0.05, 0 * k, 0.75 * k, '#111'));
   }
   return out;
 }
@@ -1035,12 +1042,12 @@ function addLayers() {
   map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
     layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['match', ['get', 'leg'], 'mine', 3, 'other', 2, 1] },
     paint: { 'line-color': '#ffffff', 'line-offset': legOffset, 'line-opacity': ['match', ['get', 'leg'], 'opp', 0.45, 1],
-             'line-width': ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 4, 6], 17, ['match', ['get', 'leg'], 'opp', 10, 16]] } });
+             'line-width': ROUTE_W.casing } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route',
     layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['match', ['get', 'leg'], 'mine', 3, 'other', 2, 1] },
     paint: { 'line-color': ['match', ['get', 'leg'], 'mine', '#1e3a8a', '#ff9100'], 'line-offset': legOffset,
              'line-opacity': ['match', ['get', 'leg'], 'opp', 0.5, 0.9],
-             'line-width': ['interpolate', ['linear'], ['zoom'], 11, ['match', ['get', 'leg'], 'opp', 2, 3.5], 17, ['match', ['get', 'leg'], 'opp', 6, 10]] } });
+             'line-width': ROUTE_W.normal } });
   map.addLayer({ id: 'trees', type: 'fill-extrusion', source: 'trees', minzoom: 15,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'opp-stops', type: 'circle', source: 'opp-stops', minzoom: 14.5,
@@ -1052,8 +1059,10 @@ function addLayers() {
   map.addLayer({ id: 'birds', type: 'fill-extrusion', source: 'birds', minzoom: 15.8,
     paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1 } });
   map.addLayer({ id: 'bus-ring', type: 'circle', source: 'bus-pts', filter: ['==', ['get', 'mine'], true],
-    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 10, 18, 40], 'circle-color': 'rgba(196,181,253,0.25)',
-             'circle-stroke-color': '#7c3aed', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 12, 18, 52], 'circle-color': 'rgba(167,139,250,0.30)',
+             'circle-stroke-color': '#e9d5ff', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map', 'circle-blur': 0.15 } });
+  map.moveLayer('bus-ring', 'buses');                                   // glow on the road, under the bus
+  map.moveLayer('route-stops', 'buses'); map.moveLayer('route-stops-label', 'buses');   // stop badges never cover your bus
   map.addLayer({ id: 'bus-dot', type: 'circle', source: 'bus-pts', maxzoom: 14.5,
     paint: { 'circle-radius': 7, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
   map.addLayer({ id: 'route-stops', type: 'circle', source: 'route-stops',
@@ -1078,7 +1087,7 @@ function addLayers() {
               'text-anchor': 'top', 'text-optional': true },
     paint: { 'text-color': COLORS.stop, 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
   map.addLayer({ id: 'bus-label', type: 'symbol', source: 'bus-pts', minzoom: 14.5,
-    layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-offset': [0, -3.2],
+    layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-offset': ['case', ['==', ['get', 'mine'], true], ['literal', [0, -5.4]], ['literal', [0, -3.2]]],
               'text-allow-overlap': true },
     paint: { 'text-color': ['coalesce', ['get', 'tcolor'], '#ffffff'], 'text-halo-color': ['get', 'color'], 'text-halo-width': 3 } });
   map.addLayer({ id: 'road-stops', type: 'circle', source: 'road-stops',
@@ -2700,8 +2709,8 @@ function frame(ts) {
     updateOwnBus(now, k);
     if (busy) { tripProgress(); return; }
     const mv = state.vehicles.find(v => v.id === T.myVid);
-    feats.push(...busParts(R, T.disp, { color: COLORS.mine.body, roof: COLORS.mine.roof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD' }));
-    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(laneXY(R, T.disp - 5)) }, properties: { label: R.no + ' · You', color: COLORS.mine.body, tcolor: COLORS.mine.text, mine: true } });
+    feats.push(...busParts(R, T.disp, { color: COLORS.mine.body, roof: COLORS.mine.roof, dd: mv && mv.type === 'DD', bendy: mv && mv.type === 'BD', scale: 1.8 }));
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: toLL(laneXY(R, T.disp - 8)) }, properties: { label: R.no + ' · You', color: COLORS.mine.body, tcolor: COLORS.mine.text, mine: true } });
     if (T.follow) followCam(now);
     tripProgress();
     if (state.mode !== 'onboard' || !state.R) return;   // trip just ended
@@ -2725,6 +2734,7 @@ function enterMode(m, chip) {
   setLayerVisible('me', m !== 'onboard');
   keepAwake(m === 'onboard' || m === 'waiting');
   if (m !== 'onboard') { $('followBtn').hidden = true; map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); }
+  try { const ob = m === 'onboard'; map.setPaintProperty('route-line', 'line-width', ob ? ROUTE_W.onboard : ROUTE_W.normal); map.setPaintProperty('route-casing', 'line-width', ob ? ROUTE_W.casingOnboard : ROUTE_W.casing); } catch {}
 }
 
 function showService(no, dir = 0) {
@@ -3057,8 +3067,8 @@ function startTrip(no, dir, o = {}) {
                  follow: true, offCount: 0, myVid: null, ltaEta: null, camBearing: null, simState: null, simTimer: null,
                  pending, wantAlight: o.alightIdx, hist: [], switchVotes: 0, switchCh: null };
   renderRoute(R);
-  map.setPadding({ top: Math.round(innerHeight * 0.3), bottom: 0, left: 0, right: 0 });
-  map.jumpTo({ center: toLL(xyAt(R, ch0)), zoom: 17.2, pitch: 62, bearing: headingAt(R, ch0, 20) * 180 / Math.PI });
+  tripPadding();
+  map.jumpTo({ center: toLL(xyAt(R, ch0)), zoom: 18, pitch: 62, bearing: headingAt(R, ch0, 20) * 180 / Math.PI });
   if (o.sim) startSim();
   setPoll(pollOnboard);
   if (pending) renderTripPanel();                 // shows "Which way is the bus going?" until the leg is known
@@ -3158,8 +3168,19 @@ function updateOwnBus(now, k) {
   else { const v = state.vehicles.find(v => v.id === T.myVid); target = v ? chAt(v.nodes, now) : T.disp; }
   T.disp = clamp(smoothCh(T.disp, target, k), 0, R.length);
 }
+// keep your bus in the part of the map you can see: below the top bar, above the trip panel, a bit low so you see ahead
+function tripPadding() {
+  const H = innerHeight, p = $('panel'), A = 76;
+  const B = p.hidden || document.body.classList.contains('clean') ? H - 20 : Math.max(A + 160, H - p.offsetHeight);
+  const pad = { top: Math.round(0.8 * A + 0.2 * B), bottom: Math.round(H - B), left: 0, right: 0 };
+  const cur = map.getPadding();
+  if (Math.abs(cur.top - pad.top) > 4 || Math.abs(cur.bottom - pad.bottom) > 4) map.setPadding(pad);
+}
 function followCam() {
   const T = state.trip, R = T.R;
+  tripPadding();
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 450);                   // gentle glow pulse
+  try { map.setPaintProperty('bus-ring', 'circle-opacity', 0.55 + 0.45 * pulse); map.setPaintProperty('bus-ring', 'circle-stroke-opacity', 0.5 + 0.5 * pulse); } catch {}
   const hd = headingAt(R, T.disp, 25) * 180 / Math.PI;
   if (T.camBearing == null) T.camBearing = hd;
   let d = ((hd - T.camBearing + 540) % 360) - 180;
