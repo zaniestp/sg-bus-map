@@ -300,6 +300,8 @@
     </select>
     <button class="btn" id="ltTestBtn" style="margin-top:10px;width:100%">⚡ Test lightning flash</button>
     <label class="check big" style="margin-top:10px"><input type="checkbox" id="fxChk"> Day and night effects (rooftop birds, nightjars)</label>
+    <div class="sub" style="margin-top:8px">Bird frequency · <b id="birdFreqTxt"></b></div>
+    <input type="range" id="birdFreq" min="0" max="100" step="10" style="width:100%" aria-label="How often birds appear">
     <h2 style="margin-top:14px">Sounds</h2>
     <div class="sndrow">
       <label class="check"><input type="checkbox" id="sndBirds"> 🐦 Birds</label>
@@ -346,7 +348,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.2', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '3.4', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -2132,48 +2134,63 @@ document.addEventListener('visibilitychange', sndUpdate);
 const BIRDS = { list: [], gone: new Map(), raf: null, last: 0, t: null, startleT: null, nj: null, njT: null, buf: null, bufLoading: false, njVisible: false };
 const fxOn = () => store.get('fxOff') !== '1';
 const raining = () => WX.mode !== 'off' && ['rain', 'heavy', 'storm'].includes(WX.effect);
-function birdsAllowed() { return fxOn() && map.getZoom() >= 16 && map.getZoom() <= 19.5 && !!map.getSource('birds'); }
-function placeBirds() {                                     // pick rooftops in view – the same buildings each time
+function birdsAllowed() { return fxOn() && birdFreq() > 0 && map.getZoom() >= 16 && map.getZoom() <= 19.5 && !!map.getSource('birds'); }
+// The map is split into ~400 m areas. Every 10 minutes each area "rolls": about 4 in 10 areas get birds.
+// Day: orioles (about 3 in 4) and crows on a few rooftops. Night: one nightjar per lively area.
+// Choices depend on the area and the building, not on what's on screen, so panning away and back shows the same birds.
+const BIRD_AREA = 400, BIRD_ROLL_MIN = 10;
+// Slider: share of street-level views that have birds (0–100 %, default 40 %). A view spans about 1.6 areas on average,
+// so the per-area chance is 1 − (1 − views)^(1/1.6)  → 40 % of views ≈ 27 % of areas.
+const birdFreq = () => { const v = store.get('birdFreq'); return v === null || !isFinite(+v) ? 40 : +v; };
+const birdChance = () => { const v = birdFreq() / 100; return v >= 1 ? 1 : 1 - Math.pow(1 - v, 1 / 1.6); };
+const birdFreqLabel = v => v <= 0 ? 'Off' : v >= 100 ? 'Almost every view' : 'About ' + Math.round(v / 10) + ' in 10 views';
+function birdAreaLively(ax, ay, night) {
+  const win = Math.floor(Date.now() / (BIRD_ROLL_MIN * 60000));
+  return hash(ax * 73.13 + ay * 19.71 + win * 3.37 + (night ? 11.9 : 0)) < birdChance();
+}
+function placeBirds() {
   if (!map.getSource('birds')) return;
+  BIRDS.lastPlace = Date.now();
   const night = state.theme === 'night';
   const keep = BIRDS.list.filter(b => b.fly);              // birds in the air finish their flight
-  if (!birdsAllowed() || raining()) { BIRDS.list = keep; BIRDS.njVisible = false; drawBirds(); return; }
-  const v = map.getBounds(), W = v.getWest(), E = v.getEast(), Sb = v.getSouth(), N = v.getNorth(), seen = new Set(), out = [];
-  const now = Date.now(), salt = night ? 7.3 : 3.1;
-  let n = 0, best = null;
-  const mk = (hv, key, c, f) => {
-    const id = key + (night ? 'n' : 'd');
-    const back = BIRDS.gone.get(id); if (back && now < back) return null;
-    const old = BIRDS.list.find(b => b.id === id && !b.fly);
-    const h = +(f.properties.render_height ?? f.properties.height ?? 10);
-    return old || { id, x: c[0] + (hash(hv * 91) - 0.5) * 4, y: c[1] + (hash(hv * 57) - 0.5) * 4, z: h, th: hash(hv * 33) * 2 * Math.PI,
-      kind: night ? 'nightjar' : hash(hv * 17) < 0.55 ? 'oriole' : 'crow' };
-  };
+  if (!birdsAllowed() || raining()) { BIRDS.list = keep; BIRDS.njVisible = false; drawBirds(); if (typeof sndUpdate === 'function') sndUpdate(); return; }
+  const now = Date.now(), salt = night ? 7.3 : 3.1, seen = new Set(), areas = new Map();
+  let n = 0;
   for (const f of tileFeatures('building')) {
     if (f.properties.hide_3d) continue;
     const ring = outerRings(f.geometry)[0]; if (!ring || ring.length < 4) continue;
     const key = f.id != null ? 'i' + f.id : ring[0][0].toFixed(5) + ',' + ring[0][1].toFixed(5);
     if (seen.has(key)) continue; seen.add(key);
     const xy = ring.map(toXY); let c = ringCentroid(xy); if (!inRing(c, xy)) c = xy[0];
-    const ll = toLL(c); if (ll[0] < W || ll[0] > E || ll[1] < Sb || ll[1] > N) continue;
-    const q = map.project(ll); if (q.x < 15 || q.x > innerWidth - 15 || q.y < 90 || q.y > innerHeight - 40) continue;   // rooftops you can actually see
-    n++;
+    const ax = Math.floor(c[0] / BIRD_AREA), ay = Math.floor(c[1] / BIRD_AREA), ak = ax + ',' + ay;
+    let A = areas.get(ak);
+    if (!A) { A = { lively: birdAreaLively(ax, ay, night), list: [] }; areas.set(ak, A); }
+    if (!A.lively) continue;
     const hv = hash((typeof f.id === 'number' ? f.id : Math.round(c[0] * 13 + c[1] * 7)) * 0.37 + salt);
-    if (!best || hv < best.hv) best = { hv, key, c, f };
-    if (hv > 1 / 26) continue;                                // about 1–2 birds per 40 buildings
-    const bd = mk(hv, key, c, f); if (bd) out.push(bd);
-    if (out.length >= 12) break;
+    A.list.push({ hv, key, c, h: +(f.properties.render_height ?? f.properties.height ?? 10) });
   }
-  // birds already sitting on a rooftop that's still on screen stay where they are
-  for (const b of BIRDS.list) {
-    if (b.fly || (b.kind === 'nightjar') !== night || out.some(o => o.id === b.id)) continue;
-    const q = map.project(toLL([b.x, b.y])); if (q.x < 0 || q.x > innerWidth || q.y < 60 || q.y > innerHeight) continue;
-    out.push(b);
+  const out = [];
+  const onScreen = c => { const q = map.project(toLL(c)); return q.x >= 15 && q.x <= innerWidth - 15 && q.y >= 90 && q.y <= innerHeight - 40; };
+  for (const A of areas.values()) {
+    if (!A.lively || !A.list.length) continue;
+    A.list.sort((p, q) => p.hv - q.hv);
+    // night: the one building in the area that's "home" to its nightjar; day: the lowest-scoring rooftops (at least one per area)
+    const picks = night ? A.list.slice(0, 1) : A.list.filter((p, i) => i === 0 || p.hv < 1 / 16).slice(0, 6);
+    for (const p of picks) {
+      if (!onScreen(p.c)) continue;
+      n++;
+      const id = p.key + (night ? 'n' : 'd');
+      const back = BIRDS.gone.get(id); if (back && now < back) continue;
+      const old = BIRDS.list.find(b => b.id === id && !b.fly);
+      out.push(old || { id, x: p.c[0] + (hash(p.hv * 91) - 0.5) * 4, y: p.c[1] + (hash(p.hv * 57) - 0.5) * 4, z: p.h, th: hash(p.hv * 33) * 2 * Math.PI,
+        kind: night ? 'nightjar' : hash(p.hv * 17) < 0.75 ? 'oriole' : 'crow' });
+      if (out.length >= 14) break;
+    }
+    if (out.length >= 14) break;
   }
-  if (!out.length && n >= 8 && best) { const bd = mk(best.hv, best.key, best.c, best.f); if (bd) out.push(bd); }   // a close-up view still gets one
   BIRDS.list = out.concat(keep);
   BIRDS.njVisible = night && out.length > 0;
-  BIRDS.count = n;
+  BIRDS.count = n; BIRDS.areas = [...areas.values()].filter(A => A.list.length || !A.lively).length; BIRDS.lively = [...areas.values()].filter(A => A.lively).length;
   drawBirds();
   if (typeof sndUpdate === 'function') sndUpdate();
 }
@@ -2190,7 +2207,7 @@ function startle(b) {                                       // take off: flap up
   const a = Math.atan2(dx / d, dy / d) + (Math.random() - 0.5) * 0.9;
   b.fly = { vx: Math.sin(a) * (14 + Math.random() * 6), vy: Math.cos(a) * (14 + Math.random() * 6), vz: 5 + Math.random() * 3, t: 0 };
   b.th = a; b.phase = 0;
-  BIRDS.gone.set(b.id, Date.now() + (180 + Math.random() * 120) * 1000);   // back somewhere in 3–5 minutes
+  BIRDS.gone.set(b.id, Date.now() + (b.kind === 'oriole' ? 60 + Math.random() * 60 : 180 + Math.random() * 120) * 1000);   // orioles back in 1–2 min, crows 3–5
   if (!BIRDS.raf) { BIRDS.last = performance.now(); BIRDS.raf = requestAnimationFrame(birdFrame); }
 }
 function birdFrame(ts) {
@@ -2244,12 +2261,12 @@ async function njPlay(force) {
   unlockAudio(); if (!actx || actx.state !== 'running') return;
   const buf = await njBuffer(); if (!buf) return;
   const vis = BIRDS.list.filter(b => b.kind === 'nightjar');
-  const bird = vis.length ? vis[Math.floor(Math.random() * vis.length)] : null;   // in rain no bird is shown: the call comes from somewhere unseen
+  const bird = !force && vis.length ? vis[Math.floor(Math.random() * vis.length)] : null;   // in rain no bird is shown: the call comes from somewhere unseen
   const src = actx.createBufferSource(); src.buffer = buf;
   const g = actx.createGain(), pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
   g.gain.value = 0; src.connect(g); if (pan) { g.connect(pan); pan.connect(actx.destination); } else g.connect(actx.destination);
   const fixedPan = (Math.random() - 0.5) * 1.2;
-  BIRDS.nj = { src, g, pan, bird, fixedPan };
+  BIRDS.nj = { src, g, pan, bird, fixedPan, force: !!force };
   src.onended = () => { BIRDS.nj = null; };
   src.start(); njFollow();
 }
@@ -2275,7 +2292,12 @@ function njSchedule() {
   BIRDS.njT = setTimeout(() => { njSchedule(); if (njAllowed() && (BIRDS.njVisible || raining())) njPlay(); }, (60 + Math.random() * 120) * 1000);
 }
 let birdMoveT = null;
-map.on('moveend', () => { clearTimeout(birdMoveT); birdMoveT = setTimeout(placeBirds, 400); });
+map.on('moveend', () => {
+  clearTimeout(birdMoveT);
+  const since = Date.now() - (BIRDS.lastPlace || 0);
+  if (state.mode === 'onboard' && since > 2500) placeBirds();          // riding: the camera never stops, so update as we go
+  birdMoveT = setTimeout(placeBirds, state.mode === 'onboard' ? 2500 : 400);
+});
 map.on('sourcedata', e => { if (e.sourceId === 'openmaptiles' && e.isSourceLoaded && !BIRDS.list.length) { clearTimeout(birdMoveT); birdMoveT = setTimeout(placeBirds, 600); } });
 setInterval(() => { placeBirds(); }, 30000);               // theme / rain changes
 birdTick(); njSchedule();
@@ -3471,6 +3493,7 @@ function resetAll() {
 }
 
 // ---- trip sounds
+$('birdFreq').oninput = e => { store.set('birdFreq', e.target.value); $('birdFreqTxt').textContent = birdFreqLabel(+e.target.value); placeBirds(); };
 $('fxChk').onchange = e => { store.set('fxOff', e.target.checked ? '0' : '1'); placeBirds(); };
 $('sndBtn').onclick = () => {
   const m = !SND.muted(); store.set('sndMute', m ? '1' : '0'); sndUpdate();
@@ -3485,7 +3508,7 @@ $('sndPreview').onclick = () => {
   setTimeout(() => { try { if (SND.on('birds')) state.theme === 'night' ? sndCricket() : sndBird(); } catch {} }, 600);
   setTimeout(() => { try { if (SND.on('bells')) sndBell(); } catch {} }, 1800);
   setTimeout(() => sndThunder(0, 0.8), 6000);
-  setTimeout(() => { if (SND.on('nightjar')) { njPlay(true); if (BIRDS.nj) BIRDS.nj.force = true; } }, 9500);
+  setTimeout(() => { if (SND.on('nightjar')) njPlay(true).then(() => { if (!BIRDS.nj && !BIRDS.buf) toast('Nightjar sound file not found – upload nightjar.m4a next to index.html', 5000); }); }, 9500);
   setTimeout(() => { if (SND.preview <= Date.now()) { $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); } }, 20200);
 };
 // ---- clean screen
@@ -3524,6 +3547,7 @@ $('creditBox').addEventListener('click', e => { if (e.target === $('creditBox'))
 $('ltTestBtn').onclick = () => { $('settings').hidden = true; setTimeout(ltTest, 300); };
 $('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Birds', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).checked = SND.on(k.toLowerCase());
   $('fxChk').checked = fxOn();
+  $('birdFreq').value = birdFreq(); $('birdFreqTxt').textContent = birdFreqLabel(birdFreq());
   $('sndVol').value = Math.round(SND.vol() * 100);
   $('settings').hidden = false; };
 $('themeSel').onchange = () => { store.set('theme', $('themeSel').value); refreshTheme(true); };
