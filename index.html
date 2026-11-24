@@ -338,7 +338,7 @@
     <div>made by <b>zaniestp</b></div>
     <div style="margin-top:6px"><a href="https://github.com/zaniestp/sg-bus-map" target="_blank" rel="noopener">github.com/zaniestp/sg-bus-map</a></div>
     <div class="ver" id="creditVer"></div>
-    <small>Bus arrivals: LTA DataMall · Addresses: OneMap / SLA · Weather &amp; lightning: NEA (data.gov.sg) · Map: OpenFreeMap / © OpenStreetMap contributors · Bus routes: sgbusdata · Nightjar recording: zaniestp</small>
+    <small>Bus arrivals: LTA DataMall · Addresses: OneMap / SLA · Weather &amp; lightning: NEA (data.gov.sg) · Map: OpenFreeMap / © OpenStreetMap contributors · Bus routes: sgbusdata · Bird recordings (nightjar, oriole, crow): zaniestp</small>
     <div class="row" style="justify-content:center"><button class="btn primary" id="creditOk">✕ Close</button></div>
   </div>
 </div>
@@ -348,7 +348,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.4', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '3.5', APP_DATE = '24 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -2039,36 +2039,6 @@ function sndInit() {
   SND.ready = true; return true;
 }
 const rnd = (a, b) => a + Math.random() * (b - a);
-function sndBird() {                                       // one short phrase from one of three "species"
-  const A = actx, t0 = A.currentTime + 0.02, kind = Math.floor(Math.random() * 3), pan = A.createStereoPanner ? A.createStereoPanner() : null;
-  const out = A.createGain(); out.gain.value = 0.16;
-  if (pan) { pan.pan.value = rnd(-0.8, 0.8); out.connect(pan); pan.connect(SND.fx); } else out.connect(SND.fx);
-  const notes = kind === 0 ? Math.floor(rnd(2, 5)) : kind === 1 ? Math.floor(rnd(5, 10)) : 2;
-  let t = t0;
-  for (let i = 0; i < notes; i++) {
-    const o = A.createOscillator(), g = A.createGain(); o.type = 'sine';
-    const f0 = kind === 2 ? (i ? 2600 : 3400) : rnd(2800, 4800), dur = kind === 1 ? rnd(0.035, 0.06) : kind === 2 ? 0.28 : rnd(0.07, 0.14);
-    o.frequency.setValueAtTime(f0, t);
-    if (kind === 0) o.frequency.exponentialRampToValueAtTime(f0 * rnd(1.3, 1.7), t + dur);        // rising chirp
-    else if (kind === 1) o.frequency.exponentialRampToValueAtTime(f0 * rnd(0.7, 0.85), t + dur);  // quick falling trill
-    else { o.frequency.exponentialRampToValueAtTime(f0 * 0.92, t + dur); }                          // two-note whistle
-    const fm = A.createOscillator(), fg = A.createGain(); fm.frequency.value = rnd(25, 60); fg.gain.value = kind === 1 ? 180 : 60;
-    fm.connect(fg); fg.connect(o.frequency);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(out); o.start(t); fm.start(t); o.stop(t + dur + 0.02); fm.stop(t + dur + 0.02);
-    t += dur + (kind === 1 ? 0.025 : kind === 2 ? 0.12 : rnd(0.06, 0.16));
-  }
-}
-function sndCricket() {                                    // night: soft cricket pulses
-  const A = actx, t0 = A.currentTime + 0.02, f = rnd(4300, 4900), out = A.createGain(); out.gain.value = 0.05; out.connect(SND.fx);
-  const pulses = Math.floor(rnd(2, 5));
-  for (let p = 0; p < pulses; p++) {
-    const t = t0 + p * 0.32, o = A.createOscillator(), g = A.createGain(), am = A.createOscillator(), ag = A.createGain();
-    o.frequency.value = f; am.frequency.value = rnd(28, 40); ag.gain.value = 0.5; am.connect(ag); ag.connect(g.gain);
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.16);
-    o.connect(g); g.connect(out); o.start(t); am.start(t); o.stop(t + 0.18); am.stop(t + 0.18);
-  }
-}
 const BELL_NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.5];   // C major pentatonic – any order sounds calm
 function sndBell() {
   const A = actx, n = Math.random() < 0.35 ? 2 : 1;
@@ -2110,10 +2080,6 @@ function sndUpdate() {
   const A = actx, now = A.currentTime;
   if (want && !SND.playing) {
     SND.playing = true;
-    sndLoop('bird', () => {
-      if (!SND.on('birds')) return;
-      if (state.theme === 'night') sndCricket(); else if (!raining()) sndBird();   // rain: no birds, crickets still sing
-    }, 2.5, 7);
     sndLoop('bell', () => { if (SND.on('bells')) sndBell(); }, 10, 25);
   }
   if (!want && SND.playing) { SND.playing = false; Object.values(SND.timers).forEach(clearTimeout); }
@@ -2202,10 +2168,18 @@ function drawBirds() {
 }
 function startle(b) {                                       // take off: flap up and away from the middle of the screen
   if (!b || b.fly || b.kind === 'nightjar') return;
-  const c = toXY(map.getCenter().toArray());
-  let dx = b.x - c[0], dy = b.y - c[1]; const d = Math.hypot(dx, dy) || 1;
-  const a = Math.atan2(dx / d, dy / d) + (Math.random() - 0.5) * 0.9;
-  b.fly = { vx: Math.sin(a) * (14 + Math.random() * 6), vy: Math.cos(a) * (14 + Math.random() * 6), vz: 5 + Math.random() * 3, t: 0 };
+  // head for the nearest left / right / top edge of the screen – never towards the camera
+  const q = map.project(toLL([b.x, b.y])), W = innerWidth;
+  const exits = [[q.x, [-250, q.y - 140]], [W - q.x, [W + 250, q.y - 140]]];      // left or right – the top edge is the far horizon
+  exits.sort((m, n) => m[0] - n[0]);
+  let target; try { target = toXY(map.unproject(exits[0][1]).toArray()); } catch { target = [b.x + 1, b.y]; }
+  let dx = target[0] - b.x, dy = target[1] - b.y; const d = Math.hypot(dx, dy) || 1;
+  const a = Math.atan2(dx / d, dy / d) + (Math.random() - 0.5) * 0.35;
+  if (b.kind === 'crow' && Math.random() < 0.4) setTimeout(() => callPlay('crow', b), 150);   // a startled crow often caws
+  // speed in screen terms: leaves the screen in about 3–4 s at any zoom
+  const mpp = 40075016 * Math.cos(map.getCenter().lat * Math.PI / 180) / (512 * Math.pow(2, map.getZoom()));
+  const sp = Math.max(14, mpp * (65 + Math.random() * 25));
+  b.fly = { vx: Math.sin(a) * sp, vy: Math.cos(a) * sp, vz: Math.max(5, mpp * 14), t: 0 };
   b.th = a; b.phase = 0;
   BIRDS.gone.set(b.id, Date.now() + (b.kind === 'oriole' ? 60 + Math.random() * 60 : 180 + Math.random() * 120) * 1000);   // orioles back in 1–2 min, crows 3–5
   if (!BIRDS.raf) { BIRDS.last = performance.now(); BIRDS.raf = requestAnimationFrame(birdFrame); }
@@ -2222,9 +2196,16 @@ function birdFrame(ts) {
     F.vz *= 0.995;
     any = true;
   }
-  BIRDS.list = BIRDS.list.filter(b => !b.fly || b.fly.t < 7);      // gone off-screen by now
+  BIRDS.list = BIRDS.list.filter(b => !b.fly || (b.fly.t < 20 && birdOnScreen(b)));   // removed only once it has flown off the screen
+  if (BIRDS.list.some(b => b.fly)) any = true;
   drawBirds();
   if (any) BIRDS.raf = requestAnimationFrame(birdFrame);
+}
+function birdOnScreen(b) {                                 // includes its height: a climbing bird rises up the screen
+  const q = map.project(toLL([b.x, b.y])), lat = map.getCenter().lat;
+  const mpp = 40075016 * Math.cos(lat * Math.PI / 180) / (512 * Math.pow(2, map.getZoom()));
+  const y = q.y - (b.z / mpp) * Math.sin(map.getPitch() * Math.PI / 180), m = 80;
+  return q.x > -m && q.x < innerWidth + m && y > -m && y < innerHeight + m;
 }
 function birdTick() {                                        // now and then one bird gets startled; buses close by scare birds too
   clearTimeout(BIRDS.startleT);
@@ -2249,30 +2230,45 @@ function birdAt(point) {                                    // a tap near a bird
   return false;
 }
 // ---- nightjar call (your recording), placed at a nightjar on screen: pans with it, fades out as it leaves the view
-async function njBuffer() {
-  if (BIRDS.buf || BIRDS.bufLoading || !actx) return BIRDS.buf;
-  BIRDS.bufLoading = true;
-  try { const r = await fetch('nightjar.m4a'); if (r.ok) BIRDS.buf = await actx.decodeAudioData(await r.arrayBuffer()); } catch {}
-  BIRDS.bufLoading = false; return BIRDS.buf;
+// ---- bird calls (your recordings). One call at a time; it comes from the bird's place on screen,
+//      pans with it and fades towards the side it leaves by.
+const CALLS = {
+  nightjar: { file: 'nightjar.m4a', segs: null, vol: 0.54 },
+  oriole:   { file: 'oriole.m4a', segs: [[0, 1.3], [1.65, 1.15], [3.15, 1.1], [4.6, 1.15], [6.1, 1.15], [7.6, 1.1]], vol: 0.5 },
+  crow:     { file: 'crow.m4a', segs: [[0, 2.65], [3.0, 3.25], [6.6, 3.25]], vol: 0.4 }
+};
+async function callBuffer(kind) {
+  const C = CALLS[kind]; if (C.buf || !actx) return C.buf;
+  if (!C.loading) C.loading = (async () => { try { const r = await fetch(C.file); if (r.ok) C.buf = await actx.decodeAudioData(await r.arrayBuffer()); } catch {} C.loading = null; })();
+  await C.loading; return C.buf;
 }
-function njAllowed() { return state.theme === 'night' && SND.on('nightjar') && !SND.muted() && !document.hidden; }
-async function njPlay(force) {
-  if (BIRDS.nj || (!force && !njAllowed())) return;
+async function njBuffer() { return callBuffer('nightjar'); }
+function callAllowed(kind) {
+  if (SND.muted() || document.hidden) return false;
+  if (kind === 'nightjar') return state.theme === 'night' && SND.on('nightjar');
+  return state.theme !== 'night' && !raining() && SND.on('birds') && fxOn();
+}
+function njAllowed() { return callAllowed('nightjar'); }
+async function callPlay(kind, bird, force) {
+  if (BIRDS.nj || (!force && !callAllowed(kind))) return;
   unlockAudio(); if (!actx || actx.state !== 'running') return;
-  const buf = await njBuffer(); if (!buf) return;
-  const vis = BIRDS.list.filter(b => b.kind === 'nightjar');
-  const bird = !force && vis.length ? vis[Math.floor(Math.random() * vis.length)] : null;   // in rain no bird is shown: the call comes from somewhere unseen
-  const src = actx.createBufferSource(); src.buffer = buf;
+  const buf = await callBuffer(kind); if (!buf || BIRDS.nj) return;
+  const C = CALLS[kind], src = actx.createBufferSource(); src.buffer = buf;
   const g = actx.createGain(), pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
   g.gain.value = 0; src.connect(g); if (pan) { g.connect(pan); pan.connect(actx.destination); } else g.connect(actx.destination);
-  const fixedPan = (Math.random() - 0.5) * 1.2;
-  BIRDS.nj = { src, g, pan, bird, fixedPan, force: !!force };
-  src.onended = () => { BIRDS.nj = null; };
-  src.start(); njFollow();
+  BIRDS.nj = { src, g, pan, bird: bird || null, kind, fixedPan: (Math.random() - 0.5) * 1.2, force: !!force };
+  src.onended = () => { if (BIRDS.nj && BIRDS.nj.src === src) BIRDS.nj = null; };
+  if (C.segs) { const [o, d] = C.segs[Math.floor(Math.random() * C.segs.length)]; src.start(0, o, d); }   // one whistle / one caw series
+  else src.start();
+  njFollow();
+}
+async function njPlay(force) {
+  const vis = BIRDS.list.filter(b => b.kind === 'nightjar');
+  return callPlay('nightjar', !force && vis.length ? vis[Math.floor(Math.random() * vis.length)] : null, force);   // in rain no bird is shown: the call comes from somewhere unseen
 }
 function njFollow() {                                       // follow the bird's place on screen while the call plays
   const N = BIRDS.nj; if (!N) return;
-  const now = actx.currentTime, base = 0.9 * (SND.vol() / 0.5) * 0.6;
+  const now = actx.currentTime, base = CALLS[N.kind].vol * (SND.vol() / 0.5);
   let gain = base, p = N.fixedPan;
   if (N.bird) {
     const q = map.project(toLL([N.bird.x, N.bird.y])), W = innerWidth, H = innerHeight;
@@ -2282,7 +2278,7 @@ function njFollow() {                                       // follow the bird's
     if (out > 0) p = q.x < 0 ? -1 : q.x > W ? 1 : p;              // fades towards the side it left by
     if (map.getZoom() < 15) gain = 0;
   } else gain = base * 0.55;
-  if (!njAllowed() && !N.force) gain = 0;
+  if (!callAllowed(N.kind) && !N.force) gain = 0;
   N.g.gain.setTargetAtTime(gain, now, 0.35);
   if (N.pan) N.pan.pan.setTargetAtTime(p, now, 0.25);
   setTimeout(njFollow, 120);
@@ -2291,6 +2287,17 @@ function njSchedule() {
   clearTimeout(BIRDS.njT);
   BIRDS.njT = setTimeout(() => { njSchedule(); if (njAllowed() && (BIRDS.njVisible || raining())) njPlay(); }, (60 + Math.random() * 120) * 1000);
 }
+function dayCallSchedule() {                                // daytime: a bird on screen calls once in a while
+  clearTimeout(BIRDS.dayT);
+  BIRDS.dayT = setTimeout(() => {
+    dayCallSchedule();
+    const vis = BIRDS.list.filter(b => b.kind !== 'nightjar' && birdOnScreen(b));
+    if (!vis.length || !callAllowed('oriole')) return;
+    const b = vis[Math.floor(Math.random() * vis.length)];
+    callPlay(b.kind, b);
+  }, (30 + Math.random() * 60) * 1000);
+}
+dayCallSchedule();
 let birdMoveT = null;
 map.on('moveend', () => {
   clearTimeout(birdMoveT);
@@ -3505,9 +3512,10 @@ $('sndVol').oninput = e => { store.set('sndVol', e.target.value); sndUpdate(); }
 $('sndPreview').onclick = () => {
   if (SND.preview > Date.now()) { SND.preview = 0; $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); return; }
   SND.preview = Date.now() + 20000; sndUpdate(); $('sndPreview').textContent = '■ Stop preview';
-  setTimeout(() => { try { if (SND.on('birds')) state.theme === 'night' ? sndCricket() : sndBird(); } catch {} }, 600);
+  setTimeout(() => { if (SND.on('birds')) callPlay('oriole', null, true); }, 600);
+  setTimeout(() => { if (SND.on('birds')) callPlay('crow', null, true); }, 2600);
   setTimeout(() => { try { if (SND.on('bells')) sndBell(); } catch {} }, 1800);
-  setTimeout(() => sndThunder(0, 0.8), 6000);
+  setTimeout(() => sndThunder(0, 0.8), 6500);
   setTimeout(() => { if (SND.on('nightjar')) njPlay(true).then(() => { if (!BIRDS.nj && !BIRDS.buf) toast('Nightjar sound file not found – upload nightjar.m4a next to index.html', 5000); }); }, 9500);
   setTimeout(() => { if (SND.preview <= Date.now()) { $('sndPreview').textContent = '▶ Preview sounds'; sndUpdate(); } }, 20200);
 };
