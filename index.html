@@ -240,6 +240,23 @@
   .favicons .pill { font-size: 18px; padding: 4px 9px; }
   .favnote { border-top: 1px dashed rgba(127,127,127,.3); padding-top: 6px; margin-top: 6px; }
   .arr.sel { background: rgba(61,90,254,.08); border-radius: 10px; }
+  .jtabs { display: flex; gap: 6px; margin: 2px 0 8px; }
+  .jtab { flex: 1; min-width: 0; text-align: left; border: 1.5px solid rgba(127,127,127,.3); background: transparent; color: var(--ink); border-radius: 12px; padding: 6px 8px; cursor: pointer; }
+  .jtab b { display: block; font-size: 14px; }
+  .jtab small { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jtab.on { border-color: var(--blue); background: rgba(61,90,254,.1); }
+  .jtab:disabled { opacity: .45; }
+  .jchosen { border: 1px solid rgba(127,127,127,.25); border-radius: 12px; padding: 8px 10px; }
+  .jlist .res { padding: 10px 4px; border-bottom: 1px solid rgba(127,127,127,.15); cursor: pointer; }
+  .jlist .res small, #panel .res small { display: block; color: var(--muted); font-size: 12px; }
+  #panel > .res { padding: 10px 4px; border-bottom: 1px solid rgba(127,127,127,.15); cursor: pointer; }
+  .jsaved { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; }
+  .jsaved .pill { white-space: nowrap; }
+  .jopts { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+  .pill.sm { padding: 5px 10px; font-size: 13px; }
+  #pickBar { position: fixed; left: 10px; right: 10px; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 7; display: flex; align-items: center; gap: 8px;
+    background: var(--card); color: var(--ink); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px; font-weight: 700; font-size: 14px; }
+  #pickBar span { flex: 1; }
 </style>
 </head>
 <body>
@@ -292,6 +309,7 @@
 <div id="panel" hidden></div>
 <div id="stopCard" hidden></div>
 <div id="addrCard" hidden></div>
+<div id="pickBar" hidden></div>
 
 <div id="alertBox" hidden>
   <h2 id="alertTitle"></h2>
@@ -387,7 +405,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '4.1', APP_DATE = '25 Nov 2026';
+const APP_VERSION = '4.2', APP_DATE = '25 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -2011,7 +2029,8 @@ setInterval(() => { if (panelState.hidden && !$('panel').hidden) updatePanelSumm
 function hidePanel() { $('panel').hidden = true; $('panel').innerHTML = ''; panelState.key = null; panelState.hidden = false; placeFabs(); }
 function placeFabs() {
   const p = $('panel');
-  $('fabs').style.bottom = (p.hidden ? 24 : p.offsetHeight + 12) + 'px';
+  const pb = $('pickBar');
+  $('fabs').style.bottom = (p.hidden ? (pb && !pb.hidden ? 84 : 24) : p.offsetHeight + 12) + 'px';
   if (typeof placeChips === 'function') placeChips();
 }
 window.addEventListener('resize', placeFabs);
@@ -2528,7 +2547,7 @@ function updateStops(force) {
 // ======================= map taps =======================
 function onMapClick(e) {
   const p = e.point, pad = 14;
-  if (PLAN.pick) { pickOnMap(e.lngLat); return; }
+  if (PLAN.stopPick) { stopPickTap(e); return; }
   if (birdAt(p)) return;
   const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops', 'opp-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
@@ -3952,6 +3971,12 @@ function jrEnsure() {
     paint: { 'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3, 17, 8], 'line-opacity': ['get', 'op'] } }, before);
   map.addLayer({ id: 'jr-walk', type: 'line', source: 'jr-line', filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round' },
     paint: { 'line-color': '#475569', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 2, 17, 5], 'line-dasharray': [0.1, 2] } }, before);
+  map.addSource('jr-pick', { type: 'geojson', data: emptyFC() });
+  map.addLayer({ id: 'jr-pick-c', type: 'circle', source: 'jr-pick',
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 6, 17, 11], 'circle-color': '#7c3aed', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+  map.addLayer({ id: 'jr-pick-l', type: 'symbol', source: 'jr-pick',
+    layout: { 'text-field': ['get', 'n'], 'text-font': ['Noto Sans Bold'], 'text-size': 11.5, 'text-offset': [0, 1.2], 'text-anchor': 'top', 'text-max-width': 12 },
+    paint: { 'text-color': '#5b21b6', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
   map.addLayer({ id: 'jr-pts', type: 'circle', source: 'jr-pts',
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 7, 17, 12], 'circle-color': ['get', 'c'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
   map.addLayer({ id: 'jr-lbl', type: 'symbol', source: 'jr-pts',
@@ -3998,95 +4023,177 @@ function drawJourney(J, fit) {
 // ---------- the Directions screen ----------
 function openDirections(pre = {}) {
   closeAddrCard(); hideResults();
-  if (pre.to) PLAN.to = pre.to;
-  if (pre.from) PLAN.from = pre.from;
-  if (!PLAN.from || PLAN.from.me) PLAN.from = myPlace() || PLAN.from;
+  if (pre.to) { PLAN.to = pre.to; PLAN.toStop = pre.to.code || null; }
+  if (pre.from) { PLAN.from = pre.from; PLAN.fromStop = pre.from.code || null; }
+  if (!PLAN.from || PLAN.from.me) { const me = myPlace(); if (me) { PLAN.from = me; PLAN.fromStop = PLAN.fromStop && PLAN.from.me ? PLAN.fromStop : null; } }
   PLAN.tripBan = new Set();
   setPoll(null); clearRoute(); jrClear();
   enterMode('plan', '🧭 Directions');
+  PLAN.tab = pre.to && PLAN.from ? 'end' : 'start';
+  if (pre.to && !pre.to.code) return stopPickStart('to');
   renderPlanForm();
 }
-function placeField(which) {
-  const p = PLAN[which];
-  const input = h('input', { class: 'field', placeholder: which === 'from' ? 'From: block, postal code, stop…' : 'To: block, postal code, stop…', value: p ? p.label : '', enterkeyhint: 'search' });
-  const sug = h('div', { class: 'jsug', hidden: true });
-  const star = p && !p.me && !p.fav ? h('button', { class: 'xbtn', title: 'Save as favourite', onclick: () => favEdit(p, f => { if (f) { PLAN[which] = favPlace(f); renderPlanForm(); } }) }, '☆') : null;
-  const pickItem = (pl) => { PLAN[which] = pl; renderPlanForm(); if (PLAN.from && PLAN.to) planSearch(); };
-  const fill = async () => {
-    const q = input.value.trim(), seq = ++PLAN.sugSeq;
-    sug.innerHTML = '';
-    const items = [];
+// ---- tabs: ① Start · ② End · ③ Routes
+function stopLine(which) {
+  const p = PLAN[which], sc = PLAN[which + 'Stop'];
+  if (!p) return which === 'from' ? 'Where are you starting?' : 'Where are you going?';
+  return placeName(p) + (p.code ? '' : sc ? ' · 🚏 ' + stopName(sc) + ' ' + sc : ' · ✨ best stop');
+}
+function planTabs() {
+  const ready = PLAN.from && PLAN.to;
+  const tab = (k, n, t, sub) => h('button', { class: 'jtab' + (PLAN.tab === k ? ' on' : ''), disabled: k === 'routes' && !ready,
+    onclick: () => { PLAN.tab = k; if (k === 'routes') (PLAN.results ? renderPlanResults() : planSearch()); else renderPlanForm(); } },
+    h('b', null, n + ' ' + t), h('small', null, sub));
+  return h('div', { class: 'jtabs' },
+    tab('start', '①', 'Start', PLAN.from ? stopLine('from') : 'not set'),
+    tab('end', '②', 'End', PLAN.to ? stopLine('to') : 'not set'),
+    tab('routes', '③', 'Routes', PLAN.results ? PLAN.results.length + ' found' : ready ? 'search' : '–'));
+}
+function renderPlanForm() {
+  if (PLAN.tab === 'routes') return PLAN.results ? renderPlanResults() : planSearch();
+  const which = PLAN.tab === 'end' ? 'to' : 'from', p = PLAN[which], sc = PLAN[which + 'Stop'];
+  const routes = PLAN.tab === 'start' ? FAV.routes() : [];
+  const input = h('input', { class: 'field', placeholder: which === 'from' ? 'Search start: block, postal code, stop…' : 'Search destination: block, postal code, stop…', enterkeyhint: 'search' });
+  const list = h('div', { class: 'jlist' });
+  const choose = pl => {
+    PLAN[which] = pl; PLAN.results = null;
+    if (pl.code) { PLAN[which + 'Stop'] = pl.code; return planAdvance(which); }
+    PLAN[which + 'Stop'] = null;
+    stopPickStart(which);
+  };
+  const fill = () => {
+    const q = input.value.trim(), seq = ++PLAN.sugSeq, items = [];
     const me = myPlace();
-    if (me) items.push([me.label, '', () => pickItem(me)]);
-    items.push(['🗺 Pick on the map', '', () => { PLAN.pick = which; toast('Tap the map to set ' + (which === 'from' ? 'the start' : 'where you are going'), 3000); togglePanel(true); }]);
+    if (!q) {
+      if (me) items.push(['📍 My location', 'Choose a stop near you', () => choose(me)]);
+      items.push(['🚏 Pick a stop on the map', 'The panel hides – tap any bus stop', () => stopPickStart(which, true)]);
+    }
     const ql = q.toLowerCase();
-    for (const f of FAV.list()) if (!q || f.name.toLowerCase().includes(ql)) items.push([f.icon + ' ' + f.name, f.code ? f.code : 'Favourite', () => pickItem(favPlace(f))]);
+    for (const f of FAV.list()) if (!q || f.name.toLowerCase().includes(ql)) items.push([f.icon + ' ' + f.name, f.code ? 'Stop ' + f.code : 'Favourite', () => choose(favPlace(f))]);
     if (q.length >= 2) {
       const r = runSearch(q);
-      for (const x of (r && r.stops || []).slice(0, 6)) items.push(['🚏 ' + x.st[2], x.code + ' · ' + x.st[3], () => pickItem(stopPlace(x.code))]);
+      for (const x of (r && r.stops || []).slice(0, 6)) items.push(['🚏 ' + x.st[2], x.code + ' · ' + x.st[3] + ' · ' + (state.stopServices[x.code] || []).slice(0, 6).join(', '), () => choose(stopPlace(x.code))]);
     }
-    const paint = () => { sug.innerHTML = ''; for (const [t, s, fn] of items) sug.append(h('div', { class: 'res', onmousedown: e => e.preventDefault(), onclick: fn }, h('div', { class: 'tx' }, t, s ? h('small', null, s) : null))); sug.hidden = !items.length; };
+    const paint = () => { list.innerHTML = ''; for (const [t, s, fn] of items) list.append(h('div', { class: 'res', onclick: fn }, h('div', { class: 'tx' }, t, s ? h('small', null, s) : null))); };
     paint();
     if (q.length >= 3 && API) {
       clearTimeout(PLAN.sugT);
       PLAN.sugT = setTimeout(async () => {
         let res = []; try { res = await addrSearch(q); } catch {}
         if (seq !== PLAN.sugSeq) return;
-        for (const a of res.slice(0, 6)) { const L = addrLines(a); items.push(['🏢 ' + L.main, L.sub, () => pickItem({ label: L.main, ll: [a.lng, a.lat], addr: a })]); }
+        for (const a of res.slice(0, 6)) { const L = addrLines(a); items.push(['🏢 ' + L.main, L.sub, () => choose({ label: L.main, ll: [a.lng, a.lat], addr: a })]); }
         paint();
       }, 400);
     }
   };
-  input.addEventListener('focus', () => { input.select(); fill(); });
   input.addEventListener('input', fill);
-  input.addEventListener('blur', () => setTimeout(() => sug.hidden = true, 200));
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') { const first = sug.querySelector('.res:nth-child(' + (myPlace() ? 3 : 2) + ')') || sug.querySelector('.res'); if (first) first.click(); } });
-  return h('div', { class: 'jfield' }, h('span', { class: 'jlab' }, which === 'from' ? 'From' : 'To'), input, star, sug);
-}
-function renderPlanForm() {
-  const routes = FAV.routes();
-  const prefBtn = (k, t) => h('button', { class: 'pill' + (PLAN.pref === k ? ' primary' : ''), onclick: () => { PLAN.pref = k; store.set('jpPref', k); if (PLAN.results) planSearch(); else renderPlanForm(); } }, t);
-  const peak = h('input', { type: 'checkbox' }); peak.checked = PLAN.peak; peak.onchange = () => { PLAN.peak = peak.checked; store.set('jpPeak', peak.checked ? '1' : '0'); };
-  setPanelKeyed('plan-form',
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { const r = list.querySelector('.res:not(:first-child)') || list.querySelector('.res'); if (r && input.value.trim()) r.click(); } });
+  setPanelKeyed('plan-' + which,
     panelHead('🧭 Directions', resetAll),
-    routes.length ? [h('div', { class: 'grp' }, '⭐ Saved routes'),
-      ...routes.map(r => h('div', { class: 'arr tap', onclick: () => openSavedRoute(r) },
-        h('span', { class: 'chip', style: 'background:#7c3aed' }, r.icon || '⭐'),
-        h('div', { class: 'info' }, h('div', { class: 'dest' }, r.name), h('div', { class: 'meta' }, r.J.legs.map(l => onOpts(l).map(o => o.no).join('/')).join(' → '))),
-        h('span', { class: 'meta' }, '›')))] : null,
-    placeField('from'),
-    h('div', { class: 'row', style: 'justify-content:center;margin:2px 0' }, h('button', { class: 'pill', onclick: () => { [PLAN.from, PLAN.to] = [PLAN.to, PLAN.from]; renderPlanForm(); } }, '⇅ Swap')),
-    placeField('to'),
-    h('div', { class: 'row' }, prefBtn('fast', '⚡ Fastest'), prefBtn('changes', '🔁 Fewest changes'), prefBtn('walk', '🚶 Least walking')),
-    h('label', { class: 'check' }, peak, 'Include peak-hour-only buses (City Direct 6xx, express …e)'),
-    h('div', { class: 'row' }, h('button', { class: 'pill primary', onclick: planSearch }, 'Find routes ▶')));
-  setPanelSummary(() => '🧭 ' + (PLAN.from ? placeName(PLAN.from) : '…') + ' → ' + (PLAN.to ? placeName(PLAN.to) : '…'));
-  jrClear();
-  const pts = [PLAN.from, PLAN.to].filter(p => p && p.ll);
-  if (pts.length) { jrEnsure(); map.getSource('jr-pts').setData({ type: 'FeatureCollection', features: pts.map((p, i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: p.ll }, properties: { c: p === PLAN.to ? '#dc2626' : '#0f172a', t: p === PLAN.to ? 'B' : 'A', n: placeName(p) } })) }); }
+    planTabs(),
+    routes.length ? h('div', { class: 'jsaved' }, routes.slice(0, 6).map(r => h('button', { class: 'pill', onclick: () => openSavedRoute(r) }, (r.icon || '⭐') + ' ' + r.name))) : null,
+    p ? h('div', { class: 'jchosen' },
+      h('div', null, h('b', null, placeName(p)), h('div', { class: 'meta' }, p.code ? '🚏 This is a bus stop' : sc ? '🚏 ' + (which === 'from' ? 'Board at ' : 'Get off at ') + stopName(sc) + ' · ' + sc + ' · ' + fmtDist(distM(p.ll, stopLL(sc))) : '✨ The app chooses the best stop')),
+      h('div', { class: 'row', style: 'margin:6px 0 0' },
+        !p.code ? h('button', { class: 'pill', onclick: () => stopPickStart(which) }, '🚏 Change stop') : null,
+        !p.me && !p.fav ? h('button', { class: 'pill', onclick: () => favEdit(p, f => { if (f) { PLAN[which] = favPlace(f); renderPlanForm(); } }) }, '☆ Save') : null,
+        PLAN.from && PLAN.to ? h('button', { class: 'pill primary', onclick: () => { PLAN.tab = 'routes'; planSearch(); } }, 'Routes ▶') : null)) : null,
+    h('div', { class: 'sub', style: 'margin:10px 0 4px' }, p ? 'Or choose another ' + (which === 'from' ? 'start' : 'destination') + ':' : (which === 'from' ? 'Where are you starting?' : 'Where are you going?')),
+    input, list);
+  fill();
+  setPanelSummary(() => '🧭 ' + stopLine('from') + ' → ' + stopLine('to'));
+  // pins for what's chosen so far
+  jrClear(); jrEnsure();
+  const pts = [['from', '#0f172a', 'A'], ['to', '#dc2626', 'B']].filter(([w]) => PLAN[w] && PLAN[w].ll)
+    .map(([w, c, t]) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: PLAN[w + 'Stop'] ? stopLL(PLAN[w + 'Stop']) : PLAN[w].ll }, properties: { c, t, n: placeName(PLAN[w]) } }));
+  map.getSource('jr-pts').setData({ type: 'FeatureCollection', features: pts });
 }
-function pickOnMap(lngLat) {
-  const which = PLAN.pick; PLAN.pick = null;
-  const ll = [lngLat.lng, lngLat.lat];
-  // name it: a OneMap address close by, else the nearest stop
-  let label = null;
-  try { const near = omPoints(ll[0] - 0.0007, ll[0] + 0.0007, ll[1] - 0.0007, ll[1] + 0.0007).map(a => ({ a, d: distM(ll, [a.lng, a.lat]) })).sort((x, y) => x.d - y.d)[0]; if (near && near.d < 60) label = addrLines(near.a).main; } catch {}
-  if (!label) { const n = jpNear(jpNet(), toXY(ll), 400)[0]; label = n ? 'Map point near ' + stopName(jpCode(n.s)) : 'Map point'; }
-  PLAN[which] = { label, ll };
-  togglePanel(false); renderPlanForm();
-  if (PLAN.from && PLAN.to) planSearch();
+function planAdvance(which) {
+  if (which === 'from') { PLAN.tab = PLAN.to ? 'routes' : 'end'; }
+  else PLAN.tab = PLAN.from ? 'routes' : 'start';
+  if (PLAN.tab === 'routes') return planSearch();
+  renderPlanForm();
 }
+// ---- choosing a bus stop on the map (panel hidden; slim bar at the bottom)
+function stopPickStart(which, anyStop) {
+  closeAddrCard();
+  const p = anyStop ? null : PLAN[which];
+  const centre = p ? p.ll : state.user ? state.user.ll : map.getCenter().toArray();
+  let near = Object.entries(state.stops).map(([c, s]) => ({ c, d: distM(centre, [s[0], s[1]]) })).filter(x => x.d <= 600 && (state.stopServices[x.c] || []).length).sort((a, b) => a.d - b.d);
+  if (!near.length) near = Object.entries(state.stops).map(([c, s]) => ({ c, d: distM(centre, [s[0], s[1]]) })).sort((a, b) => a.d - b.d).slice(0, 8);
+  near = near.slice(0, 12);
+  PLAN.stopPick = { which, anyStop: !!anyStop, near, centre };
+  jrEnsure();
+  map.getSource('jr-pick').setData({ type: 'FeatureCollection', features: near.map((x, i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: stopLL(x.c) },
+    properties: { code: x.c, n: stopName(x.c) + '\n' + x.c + ' · ' + (state.stopServices[x.c] || []).slice(0, 4).join(', ') } })) });
+  if (p) map.getSource('jr-pts').setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: p.ll }, properties: { c: which === 'from' ? '#0f172a' : '#dc2626', t: which === 'from' ? 'A' : 'B', n: placeName(p) } }] });
+  setLayerVisible('all-stops', true);
+  $('panel').hidden = true; placeFabs();
+  const bar = $('pickBar'); bar.innerHTML = '';
+  bar.append(h('span', null, '🚏 Tap a bus stop for your ' + (which === 'from' ? 'start' : 'destination')),
+    h('button', { class: 'pill', onclick: stopPickList }, '☰ List'),
+    h('button', { class: 'pill', onclick: () => stopPickEnd(true) }, '✕'));
+  bar.hidden = false; placeFabs();
+  const b = new maplibregl.LngLatBounds(); b.extend(centre); near.slice(0, 8).forEach(x => b.extend(stopLL(x.c)));
+  map.fitBounds(b, { padding: { top: 120, bottom: 110, left: 50, right: 70 }, maxZoom: 17.5, pitch: 0, bearing: 0, duration: 700 });
+}
+function stopPickList() {
+  const S = PLAN.stopPick; if (!S) return;
+  $('pickBar').hidden = true;
+  const p = PLAN[S.which];
+  setPanelKeyed('plan-picklist',
+    panelHead('🚏 Choose your ' + (S.which === 'from' ? 'boarding' : 'alighting') + ' stop', null),
+    h('div', { class: 'sub' }, S.anyStop ? 'Stops around here:' : 'Stops near ' + placeName(p) + ':'),
+    !S.anyStop && p ? h('div', { class: 'res', onclick: () => { PLAN[S.which + 'Stop'] = null; stopPickEnd(); planAdvance(S.which); } }, h('div', { class: 'tx' }, '✨ Let the app choose the best stop', h('small', null, 'Any stop within walking distance'))) : null,
+    S.near.map(x => h('div', { class: 'res', onclick: () => stopPickUse(x.c) }, h('div', { class: 'tx' }, '🚏 ' + stopName(x.c),
+      h('small', null, x.c + ' · ' + fmtDist(x.d) + ' · ' + (state.stopServices[x.c] || []).join(', '))))),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => { $('panel').hidden = true; placeFabs(); $('pickBar').hidden = false; } }, '🗺 Back to the map'),
+      h('button', { class: 'pill', onclick: () => stopPickEnd(true) }, '✕ Cancel')));
+}
+function stopPickTap(e) {                       // any stop on the map → confirm card
+  const S = PLAN.stopPick; if (!S) return;
+  const pad = 16, p = e.point;
+  const f = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers: ['jr-pick-c', 'all-stops'].filter(l => map.getLayer(l)) })[0];
+  if (!f) { toast('Tap a bus stop (the white or purple dots)', 1800); return; }
+  const code = f.properties.code, d = distM(S.centre, stopLL(code));
+  const box = $('addrCard'); box.innerHTML = '';
+  box.append(h('div', { class: 'hd' }, h('span', null, '🚏 ' + stopName(code))),
+    h('div', { class: 'meta', style: 'margin-bottom:8px' }, code + ' · ' + fmtDist(d) + ' away · ' + (state.stopServices[code] || []).join(', ')),
+    h('div', { class: 'row', style: 'margin:0' },
+      h('button', { class: 'pill primary', onclick: () => stopPickUse(code) }, '✓ Use this stop'),
+      h('button', { class: 'pill', onclick: closeAddrCard }, '✕ Not this one')));
+  box.hidden = false;
+  map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: stopLL(code) }, properties: {} });
+}
+function stopPickUse(code) {
+  const S = PLAN.stopPick; if (!S) return;
+  if (S.anyStop || !PLAN[S.which]) PLAN[S.which] = stopPlace(code);
+  PLAN[S.which + 'Stop'] = code; PLAN.results = null;
+  stopPickEnd();
+  planAdvance(S.which);
+}
+function stopPickEnd(cancel) {
+  const S = PLAN.stopPick; PLAN.stopPick = null;
+  closeAddrCard(); $('pickBar').hidden = true;
+  if (map.getSource('jr-pick')) map.getSource('jr-pick').setData(emptyFC());
+  map.getSource('sel-stop').setData(emptyFC());
+  setLayerVisible('all-stops', state.mode === 'browse');
+  if (cancel) { if (S && PLAN[S.which] && !PLAN[S.which].code && !PLAN[S.which + 'Stop']) { /* keep the place, app chooses */ } renderPlanForm(); }
+}
+function pickOnMap(lngLat) { PLAN.pick = null; }
 // run the search and show up to 5 suggestions
 async function planSearch() {
   const F = PLAN.from, T = PLAN.to;
-  if (!F || !F.ll) return toast('Choose where you are starting from');
-  if (!T || !T.ll) return toast('Choose where you are going');
+  if (!F || !F.ll) { PLAN.tab = 'start'; renderPlanForm(); return toast('Choose where you are starting from'); }
+  if (!T || !T.ll) { PLAN.tab = 'end'; renderPlanForm(); return toast('Choose where you are going'); }
+  PLAN.tab = 'routes';
   const d = distM(F.ll, T.ll);
-  setPanelKeyed('plan-results', panelHead('🧭 Routes', resetAll), h('div', { class: 'big', style: 'font-size:18px' }, 'Finding routes…'));
+  setPanelKeyed('plan-results', panelHead('🧭 Directions', resetAll), planTabs(), h('div', { class: 'big', style: 'font-size:18px' }, 'Finding routes…'));
   await new Promise(r => setTimeout(r, 30));
   const NET = jpNet(), t0 = performance.now();
   const ban = new Set([...avoidAlways(), ...PLAN.tripBan]);
-  const from = F.code ? { stop: jpIdx(F.code) } : { xy: toXY(F.ll) }, to = T.code ? { xy: toXY(T.ll) } : { xy: toXY(T.ll) };
+  const fs = PLAN.fromStop || F.code, ts = PLAN.toStop || T.code;
+  const from = fs ? { stop: jpIdx(fs) } : { xy: toXY(F.ll) }, to = ts ? { stop: jpIdx(ts) } : { xy: toXY(T.ll) };
   let r = { list: [] };
   try { r = jpPlan(NET, from, to, { n: 5, pref: PLAN.pref, ban, peak: PLAN.peak }); } catch (e) { console.error(e); }
   PLAN.ms = Math.round(performance.now() - t0);
@@ -4126,13 +4233,17 @@ function renderPlanResults(live) {
       liveTxt ? h('div', { class: 'meta' }, liveTxt) : null,
       peakNote(J));
   });
+  const opt = (on, t, fn) => h('button', { class: 'pill sm' + (on ? ' primary' : ''), onclick: fn }, t);
+  const setPref = k => { PLAN.pref = k; store.set('jpPref', k); planSearch(); };
   setPanelKeyed('plan-results',
-    panelHead('🧭 Routes', resetAll, null, async () => { await jpLoadLive(L.map(J => J.legs[0].board)); renderPlanResults(true); }),
-    h('div', { class: 'sub' }, placeName(PLAN.from) + ' → ' + placeName(PLAN.to)),
+    panelHead('🧭 Directions', resetAll, null, async () => { await jpLoadLive(L.map(J => J.legs[0].board)); renderPlanResults(true); }),
+    planTabs(),
+    h('div', { class: 'jopts' }, opt(PLAN.pref === 'fast', '⚡ Fastest', () => setPref('fast')), opt(PLAN.pref === 'changes', '🔁 Fewest', () => setPref('changes')),
+      opt(PLAN.pref === 'walk', '🚶 Least walk', () => setPref('walk')),
+      opt(PLAN.peak, '⏰ Peak buses', () => { PLAN.peak = !PLAN.peak; store.set('jpPeak', PLAN.peak ? '1' : '0'); planSearch(); })),
     PLAN.walkOnly ? h('div', { class: 'jcard' }, h('div', { class: 'jtop' }, h('b', null, '🚶 Walk ≈ ' + walkMins(PLAN.walkOnly.m) + ' min'), h('span', { class: 'meta' }, fmtDist(PLAN.walkOnly.m))), h('div', { class: 'meta' }, 'It may be quicker to walk.')) : null,
     cards.length ? cards : h('div', { class: 'note' }, 'No bus route found within 3 changes. Try a start or end point closer to a bus stop' + (PLAN.peak ? '' : ', or include peak-hour-only buses') + '.'),
-    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: renderPlanForm }, '‹ Change search'),
-      h('span', { class: 'meta' }, 'Times are estimates · searched in ' + PLAN.ms + ' ms')));
+    h('div', { class: 'meta', style: 'margin-top:6px' }, 'Times are estimates · searched in ' + PLAN.ms + ' ms'));
   setPanelSummary(() => '🧭 ' + L.length + ' routes · ' + placeName(PLAN.to));
   if (L[order[0]]) drawJourney(L[order[0]], !live);
 }
@@ -4186,7 +4297,7 @@ function openPlanDetail(J, keepEdit) {
       h('button', { class: 'pill', onclick: () => editVia(J) }, '➕ Go via a stop'),
       h('button', { class: 'pill', onclick: () => editAvoid(J) }, '🚫 Avoid a bus')),
     h('div', { class: 'row' },
-      h('button', { class: 'pill', onclick: () => PLAN.results ? renderPlanResults() : renderPlanForm() }, '‹ Routes'),
+      h('button', { class: 'pill', onclick: () => { PLAN.tab = PLAN.results ? 'routes' : 'start'; PLAN.results ? renderPlanResults() : renderPlanForm(); } }, '‹ Routes'),
       h('button', { class: 'pill', onclick: () => saveRoute(J) }, '⭐ Save route'),
       h('button', { class: 'pill primary', onclick: () => startJourney(J) }, '▶ Start journey')));
   setPanelSummary(() => '🧭 ≈ ' + Math.round(ev.T) + ' min · ' + J.legs.map(l => onOpts(l).map(o => o.no).join('/')).join(' → '));
@@ -4310,7 +4421,7 @@ function saveRoute(J) {
 function openSavedRoute(r) {
   const J = JSON.parse(JSON.stringify(r.J));
   if (J.legs[0] && J.from && J.from.me && state.user) J.from = myPlace();
-  PLAN.from = J.from; PLAN.to = J.to; PLAN.results = null;
+  PLAN.from = J.from; PLAN.to = J.to; PLAN.results = null; PLAN.fromStop = J.legs[0].board; PLAN.toStop = null;
   const ev = jpEval(J);
   if (!ev.ok) toast('⚠ A bus in "' + r.name + '" has changed – tap that leg to fix it', 4000);
   openPlanDetail(J);
@@ -4437,9 +4548,9 @@ function replanHere() {
   const to = JR.J.to;
   const here = state.user && Date.now() - state.user.t < 60000 ? myPlace() : stopPlace(JR.J.legs[JR.i].board);
   state.journey = null; state.wait = null; stopTrip();
-  PLAN.from = here; PLAN.to = to;
-  openDirections({ from: here, to });
-  planSearch();
+  PLAN.from = here; PLAN.to = to; PLAN.fromStop = here.code || null;
+  openDirections({ from: here });
+  PLAN.to = to; planSearch();
 }
 // a line in the on-board / waiting panels while on a journey
 function jTripLine() {
@@ -4460,7 +4571,7 @@ function resetAll() {
   setPoll(null);
   stopTrip();
   state.setup = state.wait = state.arrived = null;
-  state.journey = null; PLAN.pick = null; if (typeof jrClear === 'function') jrClear();
+  state.journey = null; PLAN.pick = null; if (PLAN.stopPick) stopPickEnd(); if (typeof jrClear === 'function') jrClear();
   state.userMoved = false;
   enterMode('browse');
   clearRoute(); hidePanel();
