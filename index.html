@@ -212,6 +212,34 @@
   #sndVol { width: 100%; margin-top: 4px; }
   .callrow { align-items: center; gap: 6px 8px; }
   .callrow .pill { padding: 4px 10px; margin-right: 10px; }
+  /* directions */
+  .jfield { position: relative; display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .jfield .jlab { width: 38px; font-weight: 700; font-size: 13px; color: var(--muted); }
+  .jfield .field { flex: 1; }
+  .jsug { position: absolute; left: 44px; right: 0; top: 100%; z-index: 9; background: var(--card); border-radius: 12px; box-shadow: var(--shadow); max-height: 46vh; overflow-y: auto; }
+  .jsug .res { padding: 10px 12px; border-bottom: 1px solid rgba(127,127,127,.15); cursor: pointer; }
+  .jsug .res small { display: block; color: var(--muted); font-size: 12px; }
+  .jcard { border: 1px solid rgba(127,127,127,.25); border-radius: 14px; padding: 10px 12px; margin: 8px 0; cursor: pointer; }
+  .jcard .jtop { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }
+  .jchain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; }
+  .jseg { color: #fff; font-weight: 700; border-radius: 8px; padding: 3px 8px; font-size: 14px; }
+  .jwalk { font-size: 13px; color: var(--muted); }
+  .jarrow { color: var(--muted); }
+  .jstep { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(127,127,127,.15); }
+  .jstep.tap { cursor: pointer; }
+  .jstep.editing { background: rgba(61,90,254,.07); border-radius: 10px; }
+  .jstep.sm { padding: 4px 0; }
+  .jdot { flex: none; width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .jdot.sm { width: 22px; height: 22px; font-size: 11px; }
+  .jopt { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .jopt .chip { min-width: 64px; font-size: 14px; padding: 4px 8px; }
+  .jopt.off .info { opacity: .5; text-decoration: line-through; }
+  .jnote { background: #fff7d6; color: #5b4500; border-radius: 10px; padding: 8px 10px; font-size: 14px; margin-top: 6px; }
+  body[data-theme="night"] .jnote { background: #3b3313; color: #ffe9a3; }
+  .favicons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .favicons .pill { font-size: 18px; padding: 4px 9px; }
+  .favnote { border-top: 1px dashed rgba(127,127,127,.3); padding-top: 6px; margin-top: 6px; }
+  .arr.sel { background: rgba(61,90,254,.08); border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -224,6 +252,7 @@
   </form>
   <div id="modeChip" hidden></div>
   <datalist id="svcList"></datalist>
+  <button id="planBtn" class="iconbtn" title="Directions" aria-label="Directions">🧭</button>
   <button id="onBusBtn" class="iconbtn primary" title="I'm on a bus" aria-label="I'm on a bus">🚌</button>
   <button id="restartBtn" class="iconbtn" title="Restart everything" aria-label="Restart">↺</button>
   <button id="settingsBtn" class="iconbtn" title="Settings" aria-label="Settings">⚙</button>
@@ -273,6 +302,7 @@
 <div id="settings" class="modal" hidden>
   <div class="dlg">
     <h1 id="settingsTitle">⚙ Settings</h1>
+    <button class="btn" id="favsBtn" style="width:100%;margin-bottom:8px">⭐ Favourites &amp; saved routes</button>
     <h2>Live data proxy</h2>
     <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
     <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
@@ -357,7 +387,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '3.8', APP_DATE = '24 Nov 2026';
+const APP_VERSION = '4.1', APP_DATE = '25 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -1267,7 +1297,11 @@ function openAddrCard(addrs, title) {
   for (const a of addrs) {
     const L = addrLines(a);
     const btn = h('button', { onclick: async () => { btn.textContent = (await copyText(L.copy)) ? '✓ Copied' : 'Copy failed'; setTimeout(() => btn.textContent = '📋 Copy', 1800); } }, '📋 Copy');
-    box.append(h('div', { class: 'ad' }, h('div', { class: 'at' }, h('b', null, L.main), h('small', null, L.sub)), btn));
+    const pl = a.lat ? { label: L.main, ll: [a.lng, a.lat], addr: a } : null;
+    box.append(h('div', { class: 'ad' }, h('div', { class: 'at' }, h('b', null, L.main), h('small', null, L.sub)),
+      h('div', { style: 'display:flex;flex-direction:column;gap:4px' }, btn,
+        pl && state.mode === 'browse' ? h('button', { onclick: () => openDirections({ to: pl }) }, '🧭 Go') : null,
+        pl ? h('button', { onclick: () => favEdit(pl) }, '☆ Save') : null)));
   }
   box.hidden = false;
 }
@@ -2004,6 +2038,7 @@ function setTopMode(text) {
   const browse = state.mode === 'browse';
   $('searchForm').hidden = !browse;
   $('onBusBtn').hidden = !browse;
+  $('planBtn').hidden = !browse;
   $('modeChip').hidden = browse;
   $('modeChip').textContent = text || '';
   if (!browse) $('routeBar').hidden = true;
@@ -2493,6 +2528,7 @@ function updateStops(force) {
 // ======================= map taps =======================
 function onMapClick(e) {
   const p = e.point, pad = 14;
+  if (PLAN.pick) { pickOnMap(e.lngLat); return; }
   if (birdAt(p)) return;
   const layers = state.mode === 'browse' ? ['road-stops', 'route-stops', 'opp-stops', 'all-stops'] : ['route-stops', 'opp-stops'];
   const feats = map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers });
@@ -2748,7 +2784,7 @@ function enterMode(m, chip) {
   setTopMode(chip);
   if (typeof updateWxChip === 'function') setTimeout(updateWxChip, 0);
   setLayerVisible('me', m !== 'onboard');
-  keepAwake(m === 'onboard' || m === 'waiting');
+  keepAwake(m === 'onboard' || m === 'waiting' || m === 'journey');
   if (m !== 'onboard') { $('followBtn').hidden = true; map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); }
   try { const ob = m === 'onboard'; map.setPaintProperty('route-line', 'line-width', ob ? ROUTE_W.onboard : ROUTE_W.normal); map.setPaintProperty('route-casing', 'line-width', ob ? ROUTE_W.casingOnboard : ROUTE_W.casing); } catch {}
 }
@@ -2915,6 +2951,9 @@ function openStop(code) {
     h('h3', null, 'Live arrivals ', h('span', { id: 'arrUpdated', style: 'text-transform:none;letter-spacing:0' })),
     arrivals,
     legend(),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => openDirections({ to: stopPlace(code) }) }, '🧭 Directions here'),
+      h('button', { class: 'pill', onclick: () => openDirections({ from: stopPlace(code) }) }, '🧭 From here'),
+      h('button', { class: 'pill', onclick: () => favEdit(stopPlace(code)) }, '☆ Save stop')),
     h('div', { class: 'note', style: 'font-size:12px' }, 'Tap a bus number to see its route · tap Track to follow the next bus coming here.'));
   setPanelSummary(() => '🚏 ' + st[2] + (st[2].length <= 16 ? ' ' + code : '') + (state.stopFirst ? ' · ' + state.stopFirst : ''));
   map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
@@ -3279,6 +3318,7 @@ function renderTripPanel() {
           h('div', { class: 'kpi' }, tripUI.dist, h('span', null, 'distance')),
           h('div', { class: 'kpi' }, tripUI.eta, h('span', null, 'to your stop')))]
       : h('div', { class: 'note' }, 'Choose your alighting stop to get alerts.'),
+    jTripLine(),
     h('div', { class: 'row' },
       h('button', { class: 'pill primary', onclick: () => openAlightPicker(false) }, T.alightIdx != null ? 'Change stop' : 'Choose alighting stop'),
       simBtn,
@@ -3369,6 +3409,7 @@ function startSim() {
 function onArrived() {
   const T = state.trip; if (!T) return;
   const code = T.R.codes[T.alightIdx], fromNo = T.no;
+  if (state.journey && jArrived(code, fromNo)) return;
   buzz([200, 100, 200]); beep(2);
   $('alertBox').hidden = true;
   enterMode('arrived', '📍 ' + stopName(code) + ' · ' + code);
@@ -3454,8 +3495,10 @@ function renderWaitPanel() {
     h('div', { class: 'row' },
       h('button', { class: 'pill', onclick: () => openAlightPicker(true) }, W.alightIdx != null ? 'Change stop' : 'Choose alighting stop'),
       h('button', { class: 'pill red', onclick: () => boardNow() }, "I'm on board ▶")),
+    jTripLine(),
     h('div', { class: 'row' },
       W.fromArrived ? h('button', { class: 'pill', onclick: backToList }, '‹ Back to list') : null,
+      W.journey ? h('button', { class: 'pill', onclick: () => { state.wait = null; jStep(); } }, '‹ Back to journey') : null,
       h('label', { class: 'check', style: 'margin:0' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = state.simPref; c.onchange = () => state.simPref = c.checked; return c; })(), 'Simulate ride')),
     waitUI.upd, legend());
   setPanelSummary(() => { const n = W.next, m = n ? minsUntil(parseEta(n.eta)) : null; return '⏱ Bus ' + W.no + (m == null ? ' · waiting for live time' : m <= 0 ? ' arriving now' : ' in ' + m + ' min') + ' · ' + stopName(W.code) + (stopName(W.code).length <= 16 ? ' ' + W.code : ''); });
@@ -3529,6 +3572,884 @@ function backToList() {
   setPoll(pollConnect, 30000);
 }
 
+// ======================= JOURNEY PLANNER ENGINE (pure – no map, no DOM) =======================
+// Buses only. Round-based search (RAPTOR style): round k = journeys using k buses (max 4 = 3 changes).
+// Times are minutes. Ride time is estimated from straight stop-to-stop distance; waits are typical averages.
+const JP = {
+  SPEED: 333,          // m per minute on the road (~20 km/h)
+  PER_STOP: 0.42,      // ~25 s per intermediate stop
+  ROAD: 1.2,           // road distance ≈ 1.2 × straight line between stops
+  WALK: 75,            // walking m per minute
+  WALK_K: 1.25,        // walking distance ≈ 1.25 × straight line
+  WAIT_FIRST: 5, WAIT_CHANGE: 7, WAIT_INT: 5,
+  ACCESS: [400, 600, 900],   // try these walk radii (m) to/from stops
+  TRANSFER: 200,       // change to a stop within this distance (crossing the road)
+  MAX_BUSES: 4,
+  // peak-hour-only / premium services are left out unless asked for: City Direct (6xx) and express (…e)
+  PEAK_ONLY: no => /^6\d\d[A-Z]?$/.test(no) || /e$/.test(no)
+};
+function jpBuild(services, stops) {
+  const codes = Object.keys(stops), N = codes.length, idx = {};
+  codes.forEach((c, i) => idx[c] = i);
+  const xy = new Float64Array(N * 2);
+  codes.forEach((c, i) => { const p = toXY([stops[c][0], stops[c][1]]); xy[2 * i] = p[0]; xy[2 * i + 1] = p[1]; });
+  const isInt = codes.map(c => /\b(Int|Ter|Interchange|Terminal)\b/i.test(stops[c][2]));
+  const routes = [], stopRoutes = Array.from({ length: N }, () => []);
+  for (const [no, s] of Object.entries(services)) {
+    s.routes.forEach((rc, dir) => {
+      const st = rc.map(c => idx[c]).filter(i => i != null);
+      if (st.length < 2) return;
+      const cum = new Float64Array(st.length);
+      for (let i = 1; i < st.length; i++) {
+        const d = Math.hypot(xy[2 * st[i]] - xy[2 * st[i - 1]], xy[2 * st[i] + 1] - xy[2 * st[i - 1] + 1]);
+        // long gaps between stops are expressway stretches: faster (20 km/h in town → up to 50 km/h)
+        const v = JP.SPEED + Math.max(0, Math.min(1, (d - 500) / 2500)) * 500;
+        cum[i] = cum[i - 1] + d * JP.ROAD / v + JP.PER_STOP;
+      }
+      const ri = routes.length;
+      routes.push({ no, dir, st, cum, loop: s.routes.length === 1 && rc[0] === rc[rc.length - 1] });
+      st.forEach((s0, pos) => stopRoutes[s0].push(ri * 1000 + pos));
+    });
+  }
+  // grid for "stops near a point"
+  const G = 250, grid = new Map();
+  for (let i = 0; i < N; i++) { const k = Math.floor(xy[2 * i] / G) + ',' + Math.floor(xy[2 * i + 1] / G); (grid.get(k) || grid.set(k, []).get(k)).push(i); }
+  return { codes, idx, xy, isInt, routes, stopRoutes, grid, G, N, stops, services, nearCache: new Map() };
+}
+function jpDist(NET, a, b) { return Math.hypot(NET.xy[2 * a] - NET.xy[2 * b], NET.xy[2 * a + 1] - NET.xy[2 * b + 1]); }
+function jpNear(NET, p, r) {               // stops within r metres (straight line) of point p [x,y]
+  const out = [], G = NET.G;
+  for (let gx = Math.floor((p[0] - r) / G); gx <= Math.floor((p[0] + r) / G); gx++)
+    for (let gy = Math.floor((p[1] - r) / G); gy <= Math.floor((p[1] + r) / G); gy++)
+      for (const i of NET.grid.get(gx + ',' + gy) || []) {
+        const d = Math.hypot(NET.xy[2 * i] - p[0], NET.xy[2 * i + 1] - p[1]);
+        if (d <= r) out.push({ s: i, d });
+      }
+  return out.sort((a, b) => a.d - b.d);
+}
+function jpTransfers(NET, s) {             // stops you can walk to for a change (excluding s itself)
+  let t = NET.nearCache.get(s);
+  if (!t) { t = jpNear(NET, [NET.xy[2 * s], NET.xy[2 * s + 1]], JP.TRANSFER).filter(x => x.s !== s); NET.nearCache.set(s, t); }
+  return t;
+}
+const jpWalkMin = d => d * JP.WALK_K / JP.WALK;
+// origin / destination: { xy } (a point) or { stop: index } (exactly that stop)
+function jpEnds(NET, end, radius) {
+  if (end.stop != null) return [{ s: end.stop, d: 0 }];
+  return jpNear(NET, end.xy, radius);
+}
+// One search. opts: ban (Set of service numbers), firstWait (map stopIndex → minutes, live), maxBuses
+function jpRaptor(NET, from, to, opts = {}) {
+  const N = NET.N, K = opts.maxBuses || JP.MAX_BUSES, ban = opts.ban || new Set();
+  const radius = opts.radius || JP.ACCESS[0];
+  const acc = jpEnds(NET, from, radius), egr = jpEnds(NET, to, radius);
+  if (!acc.length || !egr.length) return { journeys: [], acc, egr };
+  const egrMap = new Map(egr.map(e => [e.s, jpWalkMin(e.d)]));
+  const INF = 1e9;
+  const tauW = [new Float64Array(N).fill(INF)];           // after walking (board-able), per round
+  const tauB = [null];                                     // after riding a bus, per round
+  const parB = [null], parW = [new Int32Array(N).fill(-1)];
+  for (const a of acc) tauW[0][a.s] = Math.min(tauW[0][a.s], jpWalkMin(a.d));
+  let marked = acc.map(a => a.s), bestDest = INF;
+  const best = new Float64Array(N).fill(INF);
+  const results = [];
+  const wait = (s, k) => k === 1 ? (opts.firstWait && opts.firstWait[s] != null ? opts.firstWait[s] : JP.WAIT_FIRST) : (NET.isInt[s] ? JP.WAIT_INT : JP.WAIT_CHANGE);
+  for (let k = 1; k <= K; k++) {
+    const prev = tauW[k - 1], tb = new Float64Array(N).fill(INF), pb = new Int32Array(N * 3).fill(-1);
+    // routes to scan, from the earliest marked position
+    const q = new Map();
+    for (const s of marked) for (const rp of NET.stopRoutes[s]) {
+      const ri = Math.floor(rp / 1000), pos = rp % 1000;
+      if (ban.has(NET.routes[ri].no)) continue;
+      if (!q.has(ri) || q.get(ri) > pos) q.set(ri, pos);
+    }
+    const improved = [];
+    for (const [ri, p0] of q) {
+      const R = NET.routes[ri]; let bv = INF, bp = -1;
+      for (let i = p0; i < R.st.length; i++) {
+        const s = R.st[i];
+        if (bp >= 0 && s !== R.st[bp]) {
+          const t = bv + R.cum[i];
+          // sanity: no riding a loop round and back (ride much longer than the straight distance)
+          const ride = R.cum[i] - R.cum[bp], straight = jpDist(NET, R.st[bp], s);
+          if (t < tb[s] && t < best[s] && t < bestDest && ride <= straight * 2.4 / JP.SPEED + 8) {
+            tb[s] = t; pb[3 * s] = ri; pb[3 * s + 1] = bp; pb[3 * s + 2] = i; improved.push(s);
+          }
+        }
+        if (i < R.st.length - 1 && prev[s] < INF) {
+          const c = prev[s] + wait(s, k) - R.cum[i];
+          if (c < bv - 1e-9) { bv = c; bp = i; }
+        }
+      }
+    }
+    // walk to a nearby stop to change (cross the road)
+    const tw = Float64Array.from(tb), pw = new Int32Array(N).fill(-1);
+    const uniq = [...new Set(improved)];
+    for (const s of uniq) {
+      if (tb[s] < best[s]) best[s] = tb[s];
+      for (const n of jpTransfers(NET, s)) {
+        const t = tb[s] + jpWalkMin(n.d) + 0.5;
+        if (t < tw[n.s]) { tw[n.s] = t; pw[n.s] = s; }
+      }
+    }
+    tauB.push(tb); parB.push(pb); tauW.push(tw); parW.push(pw);
+    // reaching the destination with k buses
+    let bk = null;
+    for (const [e, wm] of egrMap) if (tb[e] < INF) { const T = tb[e] + wm; if (!bk || T < bk.T) bk = { T, e, k }; }
+    if (bk) { results.push(bk); bestDest = Math.min(bestDest, bk.T); }
+    marked = [...new Set(uniq.concat([...uniq].flatMap(s => jpTransfers(NET, s).filter(n => pw[n.s] === s).map(n => n.s))))];
+    if (!marked.length) break;
+  }
+  // rebuild each journey
+  const journeys = results.map(({ T, e, k }) => {
+    const legs = []; let s = e;
+    for (let r = k; r >= 1; r--) {
+      const pb = parB[r], ri = pb[3 * s], bp = pb[3 * s + 1], ai = pb[3 * s + 2];
+      if (ri < 0) return null;
+      const R = NET.routes[ri];
+      legs.unshift({ ri, no: R.no, dir: R.dir, bi: bp, ai, board: R.st[bp], alight: R.st[ai], ride: R.cum[ai] - R.cum[bp], stops: ai - bp });
+      s = R.st[bp];
+      const w = parW[r - 1][s];
+      if (r - 1 >= 1 && w >= 0) { legs[0].walkFrom = w; s = w; }        // walked to this stop from w
+    }
+    const a = acc.find(x => x.s === s);
+    return { T, k, legs, accessStop: s, accessM: a ? a.d * JP.WALK_K : 0, egressStop: e, egressM: egr.find(x => x.s === e).d * JP.WALK_K };
+  }).filter(Boolean);
+  return { journeys, acc, egr };
+}
+// Equivalent services for a leg: other buses from the same boarding stop to the same alighting stop
+function jpAlternatives(NET, leg, ban) {
+  const out = [{ no: leg.no, dir: leg.dir, bi: leg.bi, ai: leg.ai, ride: leg.ride }];
+  for (const rp of NET.stopRoutes[leg.board]) {
+    const ri = Math.floor(rp / 1000), bi = rp % 1000, R = NET.routes[ri];
+    if (R.no === leg.no || (ban && ban.has(R.no))) continue;
+    for (let ai = bi + 1; ai < R.st.length; ai++) if (R.st[ai] === leg.alight) {
+      const ride = R.cum[ai] - R.cum[bi];
+      if (ride <= leg.ride * 1.25 + 3 && !out.some(o => o.no === R.no)) out.push({ no: R.no, dir: R.dir, bi, ai, ride });
+      break;
+    }
+  }
+  return out;
+}
+// Last leg branches: other buses from the last boarding stop to any stop near the destination
+function jpBranches(NET, leg, egr, base, ban) {
+  const out = [];
+  for (const rp of NET.stopRoutes[leg.board]) {
+    const ri = Math.floor(rp / 1000), bi = rp % 1000, R = NET.routes[ri];
+    if (ban && ban.has(R.no)) continue;
+    let bestB = null;
+    for (let ai = bi + 1; ai < R.st.length; ai++) {
+      const e = egr.find(x => x.s === R.st[ai]); if (!e) continue;
+      const ride = R.cum[ai] - R.cum[bi], tot = ride + jpWalkMin(e.d);
+      if (ride > jpDist(NET, R.st[bi], R.st[ai]) * 2.4 / JP.SPEED + 8) break;
+      if (!bestB || tot < bestB.tot) bestB = { no: R.no, dir: R.dir, bi, ai, ride, alight: R.st[ai], egressM: e.d * JP.WALK_K, tot };
+    }
+    if (bestB && bestB.tot <= base + 4 && !out.some(o => o.no === bestB.no)) out.push(bestB);
+  }
+  return out.sort((a, b) => a.tot - b.tot);
+}
+// Full planner: several searches with different services banned → up to n varied suggestions
+// prefs: 'fast' | 'changes' | 'walk'
+function jpPlan(NET, from, to, o = {}) {
+  const n = o.n || 5, pref = o.pref || 'fast';
+  const userBan = new Set(o.ban || []);
+  if (!o.peak) for (const r of NET.routes) if (JP.PEAK_ONLY(r.no)) userBan.add(r.no);
+  const penalty = pref === 'changes' ? 12 : 5, walkW = pref === 'walk' ? 3 : 1;
+  let base = null, radius = JP.ACCESS[0];
+  for (const r of JP.ACCESS) { base = jpRaptor(NET, from, to, { ...o, ban: userBan, radius: r }); radius = r; if (base.journeys.length) break; }
+  if (!base.journeys.length) return { list: [], acc: base.acc, egr: base.egr, radius };
+  const cands = [...base.journeys], seenBan = new Set(), queue = [];
+  const addBans = j => { for (const l of j.legs) { const b = [...userBan, l.no].sort().join('|'); if (!seenBan.has(b)) { seenBan.add(b); queue.push(new Set([...userBan, l.no])); } } };
+  base.journeys.forEach(addBans);
+  let runs = 0;
+  while (queue.length && runs < 14) {
+    const ban = queue.shift(); runs++;
+    const r = jpRaptor(NET, from, to, { ...o, ban, radius });
+    for (const j of r.journeys) { cands.push(j); if (runs < 6) addBans(j); }
+  }
+  // tidy up: group equivalent buses per leg, last-leg branches, scores, remove duplicates
+  const out = [], sigs = new Set();
+  const bestT = Math.min(...cands.map(c => c.T));
+  for (const j of cands) {
+    if (j.T > bestT * 1.8 + 12) continue;
+    const legs = j.legs.map((l, i) => ({ ...l, alts: jpAlternatives(NET, l, userBan) }));
+    const last = legs[legs.length - 1];
+    last.branches = jpBranches(NET, last, base.egr, last.ride + jpWalkMin(j.egressM / JP.WALK_K), userBan);
+    const sig = legs.map((l, i) => (i === legs.length - 1 ? last.branches.map(b => b.no) : l.alts.map(a => a.no)).sort().join('/')).join('>');
+    if (sigs.has(sig)) continue; sigs.add(sig);
+    const walkM = j.accessM + j.egressM + legs.reduce((s, l) => s + (l.walkFrom != null ? jpDist(NET, l.walkFrom, l.board) * JP.WALK_K : 0), 0);
+    const changes = legs.length - 1;
+    out.push({ T: j.T, legs, changes, walkM, accessStop: j.accessStop, accessM: j.accessM, egressStop: j.egressStop, egressM: j.egressM,
+               score: j.T + penalty * changes + (walkW - 1) * jpWalkMin(walkM / JP.WALK_K)
+                      + legs.filter((l, i) => i < legs.length - 1 && l.ride < 4).length * 6,    // a 1–2 stop hop is rarely worth a change
+               sig });
+  }
+  out.sort((a, b) => a.score - b.score);
+  const cut = out.length ? Math.max(out[0].score * 1.4, out[0].score + 25) : 0;   // drop options far worse than the best
+  const good = out.filter(x => x.score <= cut);
+  const pick = good.slice(0, n);
+  // keep variety: make sure a fewest-changes and a least-walking option are in, if reasonable
+  for (const want of [x => x.changes, x => x.walkM]) {
+    const m = good.slice().sort((a, b) => want(a) - want(b) || a.score - b.score)[0];
+    if (m && !pick.includes(m)) { pick.pop(); pick.push(m); pick.sort((a, b) => a.score - b.score); }
+  }
+  return { list: pick, acc: base.acc, egr: base.egr, radius, runs: runs + 1 };
+}
+
+// ======================= DIRECTIONS: places, favourites, results, editing, journeys =======================
+const PLAN = { net: null, from: null, to: null, pref: store.get('jpPref') || 'fast', peak: store.get('jpPeak') !== '0',   // peak-hour-only buses included unless switched off
+               tripBan: new Set(),
+               results: null, sel: null, live: {}, pick: null, sugT: null, sugSeq: 0, editLeg: null };
+const LEG_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#9333ea'];
+function jpNet() {
+  if (!PLAN.net) {
+    PLAN.net = jpBuild(state.services, state.stops);
+    PLAN.net.routeBy = {}; PLAN.net.routes.forEach((r, i) => PLAN.net.routeBy[r.no + '/' + r.dir] = i);
+  }
+  return PLAN.net;
+}
+const jpCode = s => jpNet().codes[s], jpIdx = c => jpNet().idx[c];
+const stopPlace = code => ({ label: stopName(code) + ' (' + code + ')', ll: stopLL(code), code });
+function myPlace() { return state.user ? { label: '📍 My location', ll: state.user.ll, me: true } : null; }
+function placeName(p) { return p ? p.label.replace(/^📍 /, '') : ''; }
+const walkMins = m => Math.max(1, Math.round(m / JP.WALK));
+const avoidAlways = () => { try { return new Set(JSON.parse(store.get('jpAvoid') || '[]')); } catch { return new Set(); } };
+
+// ---------- favourites & saved routes (kept on this phone; export/import to move them) ----------
+const FAV = {
+  list() { try { return JSON.parse(store.get('favs') || '[]'); } catch { return []; } },
+  saveList(a) { store.set('favs', JSON.stringify(a)); },
+  routes() { try { return JSON.parse(store.get('savedRoutes') || '[]'); } catch { return []; } },
+  saveRoutes(a) { store.set('savedRoutes', JSON.stringify(a)); },
+  near(ll, m = 120) { return FAV.list().filter(f => f.ll && distM(f.ll, ll) <= m).sort((a, b) => distM(a.ll, ll) - distM(b.ll, ll))[0] || null; },
+  noteFor(fav, alightCode) {
+    if (!fav || !fav.notes) return '';
+    const n = fav.notes.find(x => x.stop === alightCode) || fav.notes.find(x => x.stop === '*');
+    return n ? n.text : '';
+  }
+};
+const FAV_ICONS = ['⭐', '🏠', '🏫', '🏢', '🏥', '🛒', '🍽', '❤️', '⚽', '⛪'];
+function favEdit(base, onSaved) {
+  const list = FAV.list();
+  const fav = base.id ? JSON.parse(JSON.stringify(list.find(f => f.id === base.id) || base))
+                      : { id: 'f' + Date.now().toString(36), icon: base.code ? '🚏' : '⭐', name: placeName(base).replace(/\s*\(\d{5}\)$/, ''), ll: base.ll, code: base.code || null, notes: [] };
+  const box = h('div', { class: 'modal' }), dlg = h('div', { class: 'dlg' });
+  const icons = h('div', { class: 'favicons' });
+  const paintIcons = () => { icons.innerHTML = ''; for (const ic of (fav.code ? ['🚏'] : []).concat(FAV_ICONS)) icons.append(h('button', { class: 'pill' + (fav.icon === ic ? ' primary' : ''), onclick: () => { fav.icon = ic; paintIcons(); } }, ic)); };
+  paintIcons();
+  const name = h('input', { class: 'field', value: fav.name, placeholder: 'Name, e.g. School' });
+  // stops near the place, for "when you alight at…" notes
+  const nearStops = Object.entries(state.stops).map(([c, s]) => ({ c, d: distM(fav.ll, [s[0], s[1]]) })).filter(x => x.d <= 700).sort((a, b) => a.d - b.d).slice(0, 15);
+  const notesBox = h('div');
+  const paintNotes = () => {
+    notesBox.innerHTML = '';
+    fav.notes.forEach((n, k) => {
+      const sel = h('select', { class: 'field', style: 'margin-bottom:4px' }, h('option', { value: '*' }, 'Any stop'),
+        ...nearStops.map(x => h('option', { value: x.c }, stopName(x.c) + ' · ' + x.c + ' · ' + fmtDist(x.d))));
+      sel.value = n.stop; sel.onchange = () => n.stop = sel.value;
+      const txt = h('input', { class: 'field', value: n.text, placeholder: 'e.g. Cross the road to Gate 4' }); txt.oninput = () => n.text = txt.value;
+      notesBox.append(h('div', { class: 'favnote' }, h('div', { class: 'sub', style: 'margin:6px 0 2px' }, 'When you alight at'), sel, txt,
+        h('button', { class: 'pill', style: 'margin-top:4px', onclick: () => { fav.notes.splice(k, 1); paintNotes(); } }, '🗑 Remove note')));
+    });
+  };
+  paintNotes();
+  const close = () => box.remove();
+  dlg.append(h('h2', null, (base.id ? 'Edit' : 'Save') + ' favourite'), icons, name,
+    h('h3', null, 'Walking notes'), h('div', { class: 'sub' }, 'Shown at the end of a journey here – one per stop you might alight at.'),
+    notesBox, h('button', { class: 'pill', onclick: () => { fav.notes.push({ stop: nearStops[0] ? nearStops[0].c : '*', text: '' }); paintNotes(); } }, '＋ Add a note'),
+    h('div', { class: 'row', style: 'margin-top:14px' },
+      base.id ? h('button', { class: 'pill red', onclick: () => { FAV.saveList(FAV.list().filter(f => f.id !== fav.id)); close(); toast('Favourite removed'); onSaved && onSaved(null); } }, 'Delete') : null,
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'pill', onclick: close }, 'Cancel'),
+      h('button', { class: 'pill primary', onclick: () => {
+        fav.name = name.value.trim() || 'Favourite'; fav.notes = fav.notes.filter(n => n.text.trim());
+        const all = FAV.list(), i = all.findIndex(f => f.id === fav.id);
+        if (i >= 0) all[i] = fav; else all.push(fav);
+        FAV.saveList(all); close(); toast(fav.icon + ' Saved: ' + fav.name); onSaved && onSaved(fav);
+      } }, 'Save')));
+  box.append(dlg); box.addEventListener('click', e => { if (e.target === box) close(); });
+  document.body.append(box);
+}
+const favPlace = f => ({ label: f.icon + ' ' + f.name, ll: f.ll, code: f.code || null, fav: f.id });
+
+// ---------- journey model: legs by stop codes (stable – can be saved) ----------
+// J = { from, to, legs: [{ board, walkFrom, opts: [{ no, dir, alight, off }] }] }
+function jpRouteOf(no, dir) { const NET = jpNet(), ri = NET.routeBy[no + '/' + dir]; return ri == null ? null : NET.routes[ri]; }
+function jpLegPos(R, board, alight) {         // positions of board → alight on a route, or null
+  const b = jpIdx(board), a = jpIdx(alight);
+  for (let i = 0; i < R.st.length - 1; i++) if (R.st[i] === b) for (let k = i + 1; k < R.st.length; k++) if (R.st[k] === a) return { bi: i, ai: k };
+  return null;
+}
+function jpFromEngine(j, from, to) {
+  const legs = j.legs.map((l, i) => {
+    const last = i === j.legs.length - 1;
+    const opts = last && l.branches && l.branches.length
+      ? l.branches.map(b => ({ no: b.no, dir: b.dir, alight: jpCode(b.alight) }))
+      : l.alts.map(a => ({ no: a.no, dir: a.dir, alight: jpCode(l.alight) }));
+    return { board: jpCode(l.board), walkFrom: l.walkFrom != null ? jpCode(l.walkFrom) : null, opts };
+  });
+  return { from, to, legs };
+}
+const onOpts = leg => leg.opts.filter(o => !o.off);
+// Estimate a journey (minutes) – also checks the buses still run that way
+function jpEval(J) {
+  const out = { T: 0, walkM: 0, changes: J.legs.length - 1, ok: true, legs: [] };
+  let prevAlight = null;
+  J.legs.forEach((leg, i) => {
+    const first = i === 0;
+    let walk = 0;
+    if (first) walk = J.from && J.from.ll ? distM(J.from.ll, stopLL(leg.board)) * JP.WALK_K : 0;
+    else if (leg.walkFrom && leg.walkFrom !== leg.board) walk = distM(stopLL(leg.walkFrom), stopLL(leg.board)) * JP.WALK_K;
+    else if (prevAlight && prevAlight !== leg.board) walk = distM(stopLL(prevAlight), stopLL(leg.board)) * JP.WALK_K;
+    const live = first ? jpFirstCatch(leg, walk) : null;
+    const wait = first ? (live ? live.wait : JP.WAIT_FIRST) : (/\b(Int|Ter)\b/.test(stopName(leg.board)) ? JP.WAIT_INT : JP.WAIT_CHANGE);
+    const rides = onOpts(leg).map(o => { const R = jpRouteOf(o.no, o.dir), p = R && jpLegPos(R, leg.board, o.alight); return p ? { o, ride: R.cum[p.ai] - R.cum[p.bi], stops: p.ai - p.bi } : { o, bad: true }; });
+    const good = rides.filter(r => !r.bad).sort((a, b) => a.ride - b.ride);
+    if (!good.length) out.ok = false;
+    const best = good[0] || { ride: 0, stops: 0, o: onOpts(leg)[0] || leg.opts[0] };
+    out.legs.push({ walk, wait, ride: best.ride, stops: best.stops, bad: rides.filter(r => r.bad).map(r => r.o.no), live, best: best.o });
+    out.T += walk / JP.WALK + wait + best.ride; out.walkM += walk;
+    prevAlight = best.o.alight;
+  });
+  const lastO = out.legs.length ? out.legs[out.legs.length - 1].best : null;
+  const eg = lastO && J.to && J.to.ll ? distM(stopLL(lastO.alight), J.to.ll) * JP.WALK_K : 0;
+  out.egressM = eg; out.walkM += eg; out.T += eg / JP.WALK;
+  return out;
+}
+// live: first bus you can still catch after walking to the stop
+function jpFirstCatch(leg, walkM) {
+  const L = PLAN.live[leg.board]; if (!L) return null;
+  const need = walkM / JP.WALK - 0.5; let best = null;
+  for (const o of onOpts(leg)) for (const t of (L[o.no] || [])) { const m = (t - Date.now()) / 60000; if (m >= need && (!best || m < best.wait)) best = { wait: Math.max(0, m), no: o.no }; }
+  return best;
+}
+async function jpLoadLive(codes) {
+  codes = [...new Set(codes)].slice(0, 12); if (!codes.length || !API) return;
+  try {
+    const d = await api('/multi-arrival?stops=' + codes.join(','));
+    for (const c of codes) {
+      const m = {};
+      for (const sv of (d.stops && d.stops[c]) || []) m[sv.ServiceNo] = sv.buses.map(b => parseEta(b.eta)).filter(t => !isNaN(t));
+      PLAN.live[c] = m;
+    }
+  } catch {}
+}
+function livePills(code, no) {
+  const L = PLAN.live[code]; if (!L) return h('span', { class: 'meta' }, '');
+  const ts = (L[no] || []).map(t => Math.round((t - Date.now()) / 60000)).filter(m => m >= -1).slice(0, 2);
+  return h('span', { class: 'meta' }, ts.length ? ts.map(m => m <= 0 ? 'Arr' : m + ' min').join(' · ') : 'no live time – may not be running');
+}
+
+// ---------- map: draw a journey ----------
+function jrEnsure() {
+  if (map.getSource('jr-line')) return;
+  map.addSource('jr-line', { type: 'geojson', data: emptyFC() });
+  map.addSource('jr-pts', { type: 'geojson', data: emptyFC() });
+  const before = map.getLayer('route-casing') ? 'route-casing' : undefined;
+  map.addLayer({ id: 'jr-casing', type: 'line', source: 'jr-line', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 5, 17, 12], 'line-opacity': ['get', 'op'] } }, before);
+  map.addLayer({ id: 'jr-bus', type: 'line', source: 'jr-line', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3, 17, 8], 'line-opacity': ['get', 'op'] } }, before);
+  map.addLayer({ id: 'jr-walk', type: 'line', source: 'jr-line', filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round' },
+    paint: { 'line-color': '#475569', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 2, 17, 5], 'line-dasharray': [0.1, 2] } }, before);
+  map.addLayer({ id: 'jr-pts', type: 'circle', source: 'jr-pts',
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 7, 17, 12], 'circle-color': ['get', 'c'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+  map.addLayer({ id: 'jr-lbl', type: 'symbol', source: 'jr-pts',
+    layout: { 'text-field': ['get', 't'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true },
+    paint: { 'text-color': '#fff' } });
+  map.addLayer({ id: 'jr-name', type: 'symbol', source: 'jr-pts', filter: ['has', 'n'],
+    layout: { 'text-field': ['get', 'n'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.6], 'text-anchor': 'top', 'text-optional': true },
+    paint: { 'text-color': ['get', 'c'], 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+}
+function jrClear() { if (map.getSource('jr-line')) { map.getSource('jr-line').setData(emptyFC()); map.getSource('jr-pts').setData(emptyFC()); } }
+function drawJourney(J, fit) {
+  jrEnsure();
+  const lines = [], pts = [], b = new maplibregl.LngLatBounds();
+  const add = ll => { if (ll) b.extend(ll); };
+  let prev = J.from && J.from.ll;
+  if (prev) { pts.push(ptF(prev, '#0f172a', 'A', placeName(J.from))); add(prev); }
+  J.legs.forEach((leg, i) => {
+    const c = LEG_COLORS[i % LEG_COLORS.length], bll = stopLL(leg.board);
+    const walkStart = i === 0 ? prev : stopLL(leg.walkFrom || prev && null) || prev;
+    if (walkStart && distM(walkStart, bll) > 8) lines.push(lineF([walkStart, bll], 'walk'));
+    onOpts(leg).forEach((o, k) => {
+      const R = getRoute(o.no, o.dir), bi = R.codes.indexOf(leg.board);
+      let ai = -1; for (let q = bi + 1; q < R.codes.length; q++) if (R.codes[q] === o.alight) { ai = q; break; }
+      if (bi < 0 || ai < 0) return;
+      const coords = sliceLL(R, R.stopCh[bi], R.stopCh[ai]);
+      lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: { kind: 'bus', c, op: k === 0 ? 1 : 0.55 } });
+      coords.forEach(add);
+      if (k === 0 || o.alight !== onOpts(leg)[0].alight) pts.push(ptF(stopLL(o.alight), c, '', null));
+    });
+    pts.push(ptF(bll, c, String(i + 1), onOpts(leg).map(o => o.no).join(' / ') + ' · ' + stopName(leg.board)));
+    prev = stopLL((onOpts(leg)[0] || leg.opts[0]).alight);
+  });
+  if (J.to && J.to.ll) { lines.push(lineF([prev, J.to.ll], 'walk')); pts.push(ptF(J.to.ll, '#dc2626', 'B', placeName(J.to))); add(J.to.ll); }
+  map.getSource('jr-line').setData({ type: 'FeatureCollection', features: lines });
+  map.getSource('jr-pts').setData({ type: 'FeatureCollection', features: pts });
+  if (fit && !b.isEmpty()) {
+    const pb = Math.min(innerHeight * 0.6, $('panel').hidden ? 0 : $('panel').offsetHeight);
+    map.fitBounds(b, { padding: { top: 90, bottom: pb + 30, left: 40, right: 40 }, maxZoom: 16, pitch: 0, bearing: 0, duration: 800 });   // flat overview so nothing hides behind the panel
+  }
+  function lineF(c, kind) { return { type: 'Feature', geometry: { type: 'LineString', coordinates: c }, properties: { kind, c: '#475569', op: 1 } }; }
+  function ptF(ll, c, t, n) { const p = { c, t }; if (n) p.n = n; return { type: 'Feature', geometry: { type: 'Point', coordinates: ll }, properties: p }; }
+}
+
+// ---------- the Directions screen ----------
+function openDirections(pre = {}) {
+  closeAddrCard(); hideResults();
+  if (pre.to) PLAN.to = pre.to;
+  if (pre.from) PLAN.from = pre.from;
+  if (!PLAN.from || PLAN.from.me) PLAN.from = myPlace() || PLAN.from;
+  PLAN.tripBan = new Set();
+  setPoll(null); clearRoute(); jrClear();
+  enterMode('plan', '🧭 Directions');
+  renderPlanForm();
+}
+function placeField(which) {
+  const p = PLAN[which];
+  const input = h('input', { class: 'field', placeholder: which === 'from' ? 'From: block, postal code, stop…' : 'To: block, postal code, stop…', value: p ? p.label : '', enterkeyhint: 'search' });
+  const sug = h('div', { class: 'jsug', hidden: true });
+  const star = p && !p.me && !p.fav ? h('button', { class: 'xbtn', title: 'Save as favourite', onclick: () => favEdit(p, f => { if (f) { PLAN[which] = favPlace(f); renderPlanForm(); } }) }, '☆') : null;
+  const pickItem = (pl) => { PLAN[which] = pl; renderPlanForm(); if (PLAN.from && PLAN.to) planSearch(); };
+  const fill = async () => {
+    const q = input.value.trim(), seq = ++PLAN.sugSeq;
+    sug.innerHTML = '';
+    const items = [];
+    const me = myPlace();
+    if (me) items.push([me.label, '', () => pickItem(me)]);
+    items.push(['🗺 Pick on the map', '', () => { PLAN.pick = which; toast('Tap the map to set ' + (which === 'from' ? 'the start' : 'where you are going'), 3000); togglePanel(true); }]);
+    const ql = q.toLowerCase();
+    for (const f of FAV.list()) if (!q || f.name.toLowerCase().includes(ql)) items.push([f.icon + ' ' + f.name, f.code ? f.code : 'Favourite', () => pickItem(favPlace(f))]);
+    if (q.length >= 2) {
+      const r = runSearch(q);
+      for (const x of (r && r.stops || []).slice(0, 6)) items.push(['🚏 ' + x.st[2], x.code + ' · ' + x.st[3], () => pickItem(stopPlace(x.code))]);
+    }
+    const paint = () => { sug.innerHTML = ''; for (const [t, s, fn] of items) sug.append(h('div', { class: 'res', onmousedown: e => e.preventDefault(), onclick: fn }, h('div', { class: 'tx' }, t, s ? h('small', null, s) : null))); sug.hidden = !items.length; };
+    paint();
+    if (q.length >= 3 && API) {
+      clearTimeout(PLAN.sugT);
+      PLAN.sugT = setTimeout(async () => {
+        let res = []; try { res = await addrSearch(q); } catch {}
+        if (seq !== PLAN.sugSeq) return;
+        for (const a of res.slice(0, 6)) { const L = addrLines(a); items.push(['🏢 ' + L.main, L.sub, () => pickItem({ label: L.main, ll: [a.lng, a.lat], addr: a })]); }
+        paint();
+      }, 400);
+    }
+  };
+  input.addEventListener('focus', () => { input.select(); fill(); });
+  input.addEventListener('input', fill);
+  input.addEventListener('blur', () => setTimeout(() => sug.hidden = true, 200));
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { const first = sug.querySelector('.res:nth-child(' + (myPlace() ? 3 : 2) + ')') || sug.querySelector('.res'); if (first) first.click(); } });
+  return h('div', { class: 'jfield' }, h('span', { class: 'jlab' }, which === 'from' ? 'From' : 'To'), input, star, sug);
+}
+function renderPlanForm() {
+  const routes = FAV.routes();
+  const prefBtn = (k, t) => h('button', { class: 'pill' + (PLAN.pref === k ? ' primary' : ''), onclick: () => { PLAN.pref = k; store.set('jpPref', k); if (PLAN.results) planSearch(); else renderPlanForm(); } }, t);
+  const peak = h('input', { type: 'checkbox' }); peak.checked = PLAN.peak; peak.onchange = () => { PLAN.peak = peak.checked; store.set('jpPeak', peak.checked ? '1' : '0'); };
+  setPanelKeyed('plan-form',
+    panelHead('🧭 Directions', resetAll),
+    routes.length ? [h('div', { class: 'grp' }, '⭐ Saved routes'),
+      ...routes.map(r => h('div', { class: 'arr tap', onclick: () => openSavedRoute(r) },
+        h('span', { class: 'chip', style: 'background:#7c3aed' }, r.icon || '⭐'),
+        h('div', { class: 'info' }, h('div', { class: 'dest' }, r.name), h('div', { class: 'meta' }, r.J.legs.map(l => onOpts(l).map(o => o.no).join('/')).join(' → '))),
+        h('span', { class: 'meta' }, '›')))] : null,
+    placeField('from'),
+    h('div', { class: 'row', style: 'justify-content:center;margin:2px 0' }, h('button', { class: 'pill', onclick: () => { [PLAN.from, PLAN.to] = [PLAN.to, PLAN.from]; renderPlanForm(); } }, '⇅ Swap')),
+    placeField('to'),
+    h('div', { class: 'row' }, prefBtn('fast', '⚡ Fastest'), prefBtn('changes', '🔁 Fewest changes'), prefBtn('walk', '🚶 Least walking')),
+    h('label', { class: 'check' }, peak, 'Include peak-hour-only buses (City Direct 6xx, express …e)'),
+    h('div', { class: 'row' }, h('button', { class: 'pill primary', onclick: planSearch }, 'Find routes ▶')));
+  setPanelSummary(() => '🧭 ' + (PLAN.from ? placeName(PLAN.from) : '…') + ' → ' + (PLAN.to ? placeName(PLAN.to) : '…'));
+  jrClear();
+  const pts = [PLAN.from, PLAN.to].filter(p => p && p.ll);
+  if (pts.length) { jrEnsure(); map.getSource('jr-pts').setData({ type: 'FeatureCollection', features: pts.map((p, i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: p.ll }, properties: { c: p === PLAN.to ? '#dc2626' : '#0f172a', t: p === PLAN.to ? 'B' : 'A', n: placeName(p) } })) }); }
+}
+function pickOnMap(lngLat) {
+  const which = PLAN.pick; PLAN.pick = null;
+  const ll = [lngLat.lng, lngLat.lat];
+  // name it: a OneMap address close by, else the nearest stop
+  let label = null;
+  try { const near = omPoints(ll[0] - 0.0007, ll[0] + 0.0007, ll[1] - 0.0007, ll[1] + 0.0007).map(a => ({ a, d: distM(ll, [a.lng, a.lat]) })).sort((x, y) => x.d - y.d)[0]; if (near && near.d < 60) label = addrLines(near.a).main; } catch {}
+  if (!label) { const n = jpNear(jpNet(), toXY(ll), 400)[0]; label = n ? 'Map point near ' + stopName(jpCode(n.s)) : 'Map point'; }
+  PLAN[which] = { label, ll };
+  togglePanel(false); renderPlanForm();
+  if (PLAN.from && PLAN.to) planSearch();
+}
+// run the search and show up to 5 suggestions
+async function planSearch() {
+  const F = PLAN.from, T = PLAN.to;
+  if (!F || !F.ll) return toast('Choose where you are starting from');
+  if (!T || !T.ll) return toast('Choose where you are going');
+  const d = distM(F.ll, T.ll);
+  setPanelKeyed('plan-results', panelHead('🧭 Routes', resetAll), h('div', { class: 'big', style: 'font-size:18px' }, 'Finding routes…'));
+  await new Promise(r => setTimeout(r, 30));
+  const NET = jpNet(), t0 = performance.now();
+  const ban = new Set([...avoidAlways(), ...PLAN.tripBan]);
+  const from = F.code ? { stop: jpIdx(F.code) } : { xy: toXY(F.ll) }, to = T.code ? { xy: toXY(T.ll) } : { xy: toXY(T.ll) };
+  let r = { list: [] };
+  try { r = jpPlan(NET, from, to, { n: 5, pref: PLAN.pref, ban, peak: PLAN.peak }); } catch (e) { console.error(e); }
+  PLAN.ms = Math.round(performance.now() - t0);
+  PLAN.results = r.list.map(j => jpFromEngine(j, F, T));
+  PLAN.walkOnly = d <= 900 ? { m: d * JP.WALK_K } : null;
+  renderPlanResults();
+  await jpLoadLive(PLAN.results.map(J => J.legs[0].board));
+  if (state.mode === 'plan' && panelState.key === 'plan-results') renderPlanResults(true);
+}
+function peakNote(J) {                       // City Direct 6xx / express …e only run at peak hours
+  const p = [...new Set(J.legs.flatMap(l => onOpts(l).map(o => o.no)).filter(JP.PEAK_ONLY))];
+  return p.length ? h('div', { class: 'meta', style: 'color:#b45309' }, '⏰ ' + p.join(', ') + ' – peak-hour bus, check it is running now') : null;
+}
+function chainEl(J, ev) {
+  const parts = [h('span', { class: 'jwalk' }, '🚶' + walkMins(ev.legs[0].walk))];
+  J.legs.forEach((leg, i) => {
+    parts.push(h('span', { class: 'jarrow' }, '›'));
+    parts.push(h('span', { class: 'jseg', style: 'background:' + LEG_COLORS[i % 4] }, onOpts(leg).map(o => o.no).join(i === J.legs.length - 1 && new Set(onOpts(leg).map(o => o.alight)).size > 1 ? ' | ' : ' / ')));
+  });
+  parts.push(h('span', { class: 'jarrow' }, '›'), h('span', { class: 'jwalk' }, '🚶' + walkMins(ev.egressM)));
+  return h('div', { class: 'jchain' }, parts);
+}
+const clock = mins => new Date(Date.now() + mins * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function renderPlanResults(live) {
+  const L = PLAN.results || [];
+  const evs = L.map(jpEval);
+  const order = L.map((J, i) => i);
+  if (live) order.sort((a, b) => evs[a].T + 5 * evs[a].changes - (evs[b].T + 5 * evs[b].changes));   // re-rank once live first-bus times are known
+  const cards = order.map(i => {
+    const J = L[i], ev = evs[i], f = ev.legs[0];
+    const liveTxt = f.live ? '🟢 Next ' + f.live.no + ' you can catch: ' + (f.live.wait < 1 ? 'now' : Math.round(f.live.wait) + ' min')
+                  : PLAN.live[J.legs[0].board] ? '⚪ No live time for ' + onOpts(J.legs[0]).map(o => o.no).join('/') + ' – may not be running' : '';
+    return h('div', { class: 'jcard', onclick: () => openPlanDetail(J) },
+      h('div', { class: 'jtop' }, h('b', null, '≈ ' + Math.round(ev.T) + ' min'), h('span', { class: 'meta' }, 'arrive ≈ ' + clock(ev.T))),
+      chainEl(J, ev),
+      h('div', { class: 'meta' }, J.legs.length + (J.legs.length > 1 ? ' buses' : ' bus') + ' · walk ' + walkMins(ev.walkM) + ' min · from ' + stopName(J.legs[0].board)),
+      liveTxt ? h('div', { class: 'meta' }, liveTxt) : null,
+      peakNote(J));
+  });
+  setPanelKeyed('plan-results',
+    panelHead('🧭 Routes', resetAll, null, async () => { await jpLoadLive(L.map(J => J.legs[0].board)); renderPlanResults(true); }),
+    h('div', { class: 'sub' }, placeName(PLAN.from) + ' → ' + placeName(PLAN.to)),
+    PLAN.walkOnly ? h('div', { class: 'jcard' }, h('div', { class: 'jtop' }, h('b', null, '🚶 Walk ≈ ' + walkMins(PLAN.walkOnly.m) + ' min'), h('span', { class: 'meta' }, fmtDist(PLAN.walkOnly.m))), h('div', { class: 'meta' }, 'It may be quicker to walk.')) : null,
+    cards.length ? cards : h('div', { class: 'note' }, 'No bus route found within 3 changes. Try a start or end point closer to a bus stop' + (PLAN.peak ? '' : ', or include peak-hour-only buses') + '.'),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: renderPlanForm }, '‹ Change search'),
+      h('span', { class: 'meta' }, 'Times are estimates · searched in ' + PLAN.ms + ' ms')));
+  setPanelSummary(() => '🧭 ' + L.length + ' routes · ' + placeName(PLAN.to));
+  if (L[order[0]]) drawJourney(L[order[0]], !live);
+}
+// ---------- one suggestion in detail, with editing ----------
+function openPlanDetail(J, keepEdit) {
+  PLAN.sel = J; if (!keepEdit) PLAN.editLeg = null;
+  const ev = jpEval(J);
+  const steps = [];
+  const fav = J.to && (J.to.fav ? FAV.list().find(f => f.id === J.to.fav) : FAV.near(J.to.ll));
+  steps.push(h('div', { class: 'jstep' }, h('span', { class: 'jdot', style: 'background:#0f172a' }, 'A'),
+    h('div', null, h('b', null, placeName(J.from)), h('div', { class: 'meta' }, '🚶 Walk ' + fmtDist(ev.legs[0].walk) + ' (≈' + walkMins(ev.legs[0].walk) + ' min) to ' + stopName(J.legs[0].board) + ' · ' + J.legs[0].board))));
+  J.legs.forEach((leg, i) => {
+    const c = LEG_COLORS[i % 4], li = ev.legs[i], last = i === J.legs.length - 1;
+    if (i > 0) {
+      const prevA = onOpts(J.legs[i - 1])[0].alight;
+      steps.push(h('div', { class: 'jstep sm' }, h('span', { class: 'jdot sm', style: 'background:#94a3b8' }, '🔁'),
+        h('div', { class: 'meta' }, prevA === leg.board ? 'Change at ' + stopName(leg.board) : '🚶 Walk ' + fmtDist(li.walk) + ' – cross to ' + stopName(leg.board) + ' (' + leg.board + ')')));
+    }
+    const multiAlight = new Set(onOpts(leg).map(o => o.alight)).size > 1;
+    const optRows = leg.opts.map(o => {
+      const R = jpRouteOf(o.no, o.dir), p = R && jpLegPos(R, leg.board, o.alight);
+      return h('div', { class: 'jopt' + (o.off ? ' off' : '') },
+        h('button', { class: 'chip', style: 'background:' + (o.off ? '#94a3b8' : c), onclick: e => { e.stopPropagation(); if (!o.off && onOpts(leg).length === 1) return toast('Keep at least one bus'); o.off = !o.off; openPlanDetail(J, true); drawJourney(J); } }, (o.off ? '☐ ' : '☑ ') + o.no),
+        h('div', { class: 'info' }, h('div', null, (p ? (p.ai - p.bi) + ' stops' : '⚠ no longer runs this way') + (multiAlight || last ? ' → ' + stopName(o.alight) + ' (' + o.alight + ')' : '')),
+          livePills(leg.board, o.no)));
+    });
+    const editing = PLAN.editLeg === i;
+    steps.push(h('div', { class: 'jstep tap' + (editing ? ' editing' : ''), onclick: () => { PLAN.editLeg = editing ? null : i; openPlanDetail(J, true); } },
+      h('span', { class: 'jdot', style: 'background:' + c }, String(i + 1)),
+      h('div', { style: 'flex:1' },
+        h('b', null, 'Board at ' + stopName(leg.board) + ' (' + leg.board + ')'),
+        h('div', { class: 'meta' }, (i === 0 && li.live ? 'Next you can catch: ' + li.live.no + ' in ' + Math.round(li.live.wait) + ' min · ' : 'Wait ≈ ' + Math.round(li.wait) + ' min · ') + 'ride ≈ ' + Math.round(li.ride) + ' min' + (multiAlight ? '' : ' · alight ' + stopName(onOpts(leg)[0].alight))),
+        optRows,
+        editing ? h('div', { class: 'row', onclick: e => e.stopPropagation() },
+          h('button', { class: 'pill', onclick: () => editSwap(J, i) }, '🔄 Swap bus'),
+          h('button', { class: 'pill', onclick: () => editAlight(J, i) }, '🏁 Get off elsewhere'),
+          h('button', { class: 'pill', onclick: () => editBoard(J, i) }, '🚏 Board elsewhere')) : h('div', { class: 'meta', style: 'font-style:italic' }, '✏️ Tap to edit this bus'))));
+  });
+  const lastO = onOpts(J.legs[J.legs.length - 1])[0];
+  const note = FAV.noteFor(fav, lastO.alight);
+  steps.push(h('div', { class: 'jstep' }, h('span', { class: 'jdot', style: 'background:#dc2626' }, 'B'),
+    h('div', null, h('b', null, placeName(J.to)), h('div', { class: 'meta' }, '🚶 Walk ' + fmtDist(ev.egressM) + ' (≈' + walkMins(ev.egressM) + ' min) from ' + stopName(lastO.alight)),
+      note ? h('div', { class: 'jnote' }, '📝 ' + note) : null)));
+  setPanelKeyed('plan-detail',
+    panelHead('≈ ' + Math.round(ev.T) + ' min · arrive ≈ ' + clock(ev.T), null, null, async () => { await jpLoadLive(J.legs.map(l => l.board)); openPlanDetail(J, true); }),
+    chainEl(J, ev),
+    !ev.ok ? h('div', { class: 'err' }, '⚠ Part of this route no longer runs this way. Tap the leg → Swap bus, or re-plan.') : null,
+    peakNote(J),
+    steps,
+    h('div', { class: 'row' },
+      h('button', { class: 'pill', onclick: () => editVia(J) }, '➕ Go via a stop'),
+      h('button', { class: 'pill', onclick: () => editAvoid(J) }, '🚫 Avoid a bus')),
+    h('div', { class: 'row' },
+      h('button', { class: 'pill', onclick: () => PLAN.results ? renderPlanResults() : renderPlanForm() }, '‹ Routes'),
+      h('button', { class: 'pill', onclick: () => saveRoute(J) }, '⭐ Save route'),
+      h('button', { class: 'pill primary', onclick: () => startJourney(J) }, '▶ Start journey')));
+  setPanelSummary(() => '🧭 ≈ ' + Math.round(ev.T) + ' min · ' + J.legs.map(l => onOpts(l).map(o => o.no).join('/')).join(' → '));
+  drawJourney(J, !keepEdit);
+  if (!keepEdit) jpLoadLive(J.legs.map(l => l.board)).then(() => { if (PLAN.sel === J && panelState.key === 'plan-detail') openPlanDetail(J, true); });
+}
+// plan the rest of a journey from a stop (keeps the legs before it)
+function planRest(prefix, fromCode, walkFrom, J) {
+  const NET = jpNet(), T = J.to;
+  if (distM(stopLL(fromCode), T.ll) <= 600 && prefix.length) return { from: J.from, to: T, legs: prefix };
+  const r = jpPlan(NET, { stop: jpIdx(fromCode) }, { xy: toXY(T.ll) }, { n: 1, pref: PLAN.pref, ban: new Set([...avoidAlways(), ...PLAN.tripBan]), peak: PLAN.peak });
+  if (!r.list.length) { toast('No bus from ' + stopName(fromCode) + ' within 3 changes'); return null; }
+  const rest = jpFromEngine(r.list[0], J.from, T).legs;
+  if (walkFrom && rest[0]) rest[0].walkFrom = walkFrom;
+  return { from: J.from, to: T, legs: prefix.concat(rest) };
+}
+function choiceSheet(title, sub, items, back) {   // a simple list of choices in the panel
+  setPanelKeyed('plan-edit', panelHead(title, null), sub ? h('div', { class: 'sub' }, sub) : null,
+    items.length ? items : h('div', { class: 'note' }, 'Nothing else found.'),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: back }, '‹ Back')));
+}
+async function editSwap(J, i) {
+  const leg = J.legs[i], last = i === J.legs.length - 1, NET = jpNet();
+  const target = onOpts(leg)[0].alight, have = new Set(leg.opts.map(o => o.no));
+  const cands = [];
+  for (const rp of NET.stopRoutes[jpIdx(leg.board)]) {
+    const ri = Math.floor(rp / 1000), bi = rp % 1000, R = NET.routes[ri];
+    if (have.has(R.no) || cands.some(c => c.no === R.no)) continue;
+    let best = null;
+    for (let ai = bi + 1; ai < Math.min(R.st.length, bi + 70); ai++) {
+      const code = jpCode(R.st[ai]);
+      const d = last ? distM(stopLL(code), J.to.ll) : distM(stopLL(code), stopLL(target));
+      if (d <= (last ? 600 : 250)) { const sc = R.cum[ai] - R.cum[bi] + jpWalkMin(d); if (!best || sc < best.sc) best = { no: R.no, dir: R.dir, alight: code, sc, stops: ai - bi, d }; }
+    }
+    if (best) cands.push(best);
+  }
+  cands.sort((a, b) => a.sc - b.sc);
+  const render = () => choiceSheet('🔄 Swap bus ' + onOpts(leg).map(o => o.no).join('/'), 'Buses from ' + stopName(leg.board) + ' that also get you ' + (last ? 'near ' + placeName(J.to) : 'to ' + stopName(target)) + ':',
+    cands.map(c => h('div', { class: 'arr tap', onclick: () => {
+      const nl = { board: leg.board, walkFrom: leg.walkFrom, opts: [{ no: c.no, dir: c.dir, alight: c.alight }] };
+      const legs = J.legs.slice(); legs[i] = nl;
+      if (!last && c.alight !== target && legs[i + 1]) legs[i + 1] = { ...legs[i + 1], walkFrom: c.alight };
+      openPlanDetail({ from: J.from, to: J.to, legs });
+    } }, h('span', { class: 'chip' }, c.no), h('div', { class: 'info' }, h('div', { class: 'dest' }, c.stops + ' stops → ' + stopName(c.alight) + (c.d > 20 ? ' (' + fmtDist(c.d) + (last ? ' to go' : ' walk') + ')' : '')), livePills(leg.board, c.no)), h('span', { class: 'meta' }, '›'))),
+    () => openPlanDetail(J, true));
+  render();
+  await jpLoadLive([leg.board]); if (panelState.key === 'plan-edit') render();
+}
+function editAlight(J, i) {
+  const leg = J.legs[i], o = onOpts(leg)[0], R = getRoute(o.no, o.dir), bi = R.codes.indexOf(leg.board);
+  const items = R.codes.slice(bi + 1).map((code, k) => h('div', { class: 'arr tap' + (code === o.alight ? ' sel' : ''), onclick: () => {
+    const prefix = J.legs.slice(0, i).concat([{ board: leg.board, walkFrom: leg.walkFrom, opts: leg.opts.filter(x => { const RR = jpRouteOf(x.no, x.dir); return RR && jpLegPos(RR, leg.board, code); }).map(x => ({ no: x.no, dir: x.dir, alight: code })) }]);
+    if (!prefix[i].opts.length) prefix[i].opts = [{ no: o.no, dir: o.dir, alight: code }];
+    const nj = planRest(prefix, code, null, J); if (nj) openPlanDetail(nj);
+  } }, h('span', { class: 'chip', style: 'background:#64748b' }, String(k + 1)), h('div', { class: 'info' }, h('div', { class: 'dest' }, stopName(code)), h('div', { class: 'meta' }, code + (code === o.alight ? ' · current' : ''))))).slice(0, 60);
+  choiceSheet('🏁 Get off ' + o.no + ' elsewhere', 'Pick a stop – the rest of the journey is re-planned from there.', items, () => openPlanDetail(J, true));
+}
+function editBoard(J, i) {
+  const leg = J.legs[i];
+  const centre = i === 0 ? J.from.ll : stopLL(onOpts(J.legs[i - 1])[0].alight);
+  const near = Object.entries(state.stops).map(([c, s]) => ({ c, d: distM(centre, [s[0], s[1]]) })).filter(x => x.d <= (i === 0 ? 700 : 300) && (state.stopServices[x.c] || []).length).sort((a, b) => a.d - b.d).slice(0, 14);
+  choiceSheet('🚏 Board elsewhere', 'Pick a stop – the journey is re-planned from there.', near.map(x => h('div', { class: 'arr tap' + (x.c === leg.board ? ' sel' : ''), onclick: () => {
+    const prefix = J.legs.slice(0, i);
+    const nj = planRest(prefix, x.c, i > 0 ? onOpts(J.legs[i - 1])[0].alight : null, J);
+    if (nj) { if (i === 0 && !prefix.length && nj.legs[0].board !== x.c) toast('Re-planned'); openPlanDetail(nj); }
+  } }, h('span', { class: 'chip', style: 'background:#64748b' }, '🚏'), h('div', { class: 'info' }, h('div', { class: 'dest' }, stopName(x.c)), h('div', { class: 'meta' }, x.c + ' · ' + fmtDist(x.d) + ' · ' + (state.stopServices[x.c] || []).slice(0, 8).join(', '))))), () => openPlanDetail(J, true));
+}
+function editVia(J) {
+  const input = h('input', { class: 'field', placeholder: 'Stop name or 5-digit code, e.g. Woodlands Int' });
+  const list = h('div');
+  const fill = () => {
+    list.innerHTML = '';
+    const r = input.value.trim().length >= 2 ? runSearch(input.value.trim()) : null;
+    for (const x of (r && r.stops || []).slice(0, 10)) list.append(h('div', { class: 'res', onclick: () => {
+      const NET = jpNet(), ban = new Set([...avoidAlways(), ...PLAN.tripBan]);
+      const a = jpPlan(NET, { xy: toXY(J.from.ll) }, { stop: jpIdx(x.code) }, { n: 1, pref: PLAN.pref, ban, peak: PLAN.peak });
+      const b = jpPlan(NET, { stop: jpIdx(x.code) }, { xy: toXY(J.to.ll) }, { n: 1, pref: PLAN.pref, ban, peak: PLAN.peak });
+      if (!a.list.length || !b.list.length) return toast('No route via ' + x.st[2]);
+      const A = jpFromEngine(a.list[0], J.from, stopPlace(x.code)), B = jpFromEngine(b.list[0], stopPlace(x.code), J.to);
+      openPlanDetail({ from: J.from, to: J.to, legs: A.legs.concat(B.legs) });
+    } }, h('div', { class: 'tx' }, '🚏 ' + x.st[2], h('small', null, x.code + ' · ' + x.st[3]))));
+  };
+  input.oninput = fill;
+  setPanelKeyed('plan-edit', panelHead('➕ Go via a stop', null), input, list, h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => openPlanDetail(J, true) }, '‹ Back')));
+  setTimeout(() => input.focus(), 100);
+}
+function editAvoid(J) {
+  const always = avoidAlways();
+  const nos = [...new Set(J.legs.flatMap(l => l.opts.map(o => o.no)).concat([...always]))].sort(naturalSort);
+  const keep = h('input', { type: 'checkbox' });
+  setPanelKeyed('plan-edit', panelHead('🚫 Avoid a bus', null),
+    h('div', { class: 'sub' }, 'Tap a bus to avoid it. The routes are found again without it.'),
+    h('div', { class: 'row' }, nos.map(no => h('button', { class: 'pill' + (always.has(no) ? ' red' : ''), onclick: () => {
+      if (always.has(no)) { always.delete(no); store.set('jpAvoid', JSON.stringify([...always])); toast(no + ' allowed again'); }
+      else if (keep.checked) { always.add(no); store.set('jpAvoid', JSON.stringify([...always])); toast('🚫 Always avoiding ' + no); }
+      else { PLAN.tripBan.add(no); toast('🚫 Avoiding ' + no + ' for this trip'); }
+      planSearch();
+    } }, (always.has(no) ? '🚫 ' : '') + no))),
+    h('label', { class: 'check' }, keep, 'Always avoid it (not just this trip)'),
+    always.size ? h('div', { class: 'meta' }, 'Always avoided: ' + [...always].join(', ') + ' – tap to allow again') : null,
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => openPlanDetail(J, true) }, '‹ Back')));
+}
+// ---------- saved routes ----------
+function saveRoute(J) {
+  const name = h('input', { class: 'field', value: (J.to.fav ? placeName(J.to) : 'To ' + placeName(J.to)) });
+  let icon = '⭐';
+  const icons = h('div', { class: 'favicons' });
+  const paint = () => { icons.innerHTML = ''; for (const ic of FAV_ICONS) icons.append(h('button', { class: 'pill' + (icon === ic ? ' primary' : ''), onclick: () => { icon = ic; paint(); } }, ic)); };
+  paint();
+  setPanelKeyed('plan-edit', panelHead('⭐ Save route', null),
+    h('div', { class: 'sub' }, 'Keeps these exact buses and stops. It shows at the top of 🧭 Directions.'),
+    icons, name,
+    h('div', { class: 'row' },
+      h('button', { class: 'pill', onclick: () => openPlanDetail(J, true) }, 'Cancel'),
+      h('button', { class: 'pill primary', onclick: () => {
+        const all = FAV.routes();
+        all.unshift({ id: 'r' + Date.now().toString(36), name: name.value.trim() || 'My route', icon, J: JSON.parse(JSON.stringify(J)) });
+        FAV.saveRoutes(all); toast(icon + ' Route saved'); openPlanDetail(J, true);
+      } }, 'Save')));
+}
+function openSavedRoute(r) {
+  const J = JSON.parse(JSON.stringify(r.J));
+  if (J.legs[0] && J.from && J.from.me && state.user) J.from = myPlace();
+  PLAN.from = J.from; PLAN.to = J.to; PLAN.results = null;
+  const ev = jpEval(J);
+  if (!ev.ok) toast('⚠ A bus in "' + r.name + '" has changed – tap that leg to fix it', 4000);
+  openPlanDetail(J);
+}
+
+// ---------- favourites manager (⚙ → Favourites) ----------
+function openFavourites() {
+  $('settings').hidden = true;
+  if (state.mode !== 'browse' && state.mode !== 'plan') return toast('Finish your trip first');
+  const favs = FAV.list(), routes = FAV.routes();
+  const move = (arr, i, d, save) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; save(arr); openFavourites(); };
+  setPanelKeyed('favs', panelHead('⭐ Favourites', hidePanel),
+    h('div', { class: 'grp' }, 'Places and stops'),
+    favs.length ? favs.map((f, i) => h('div', { class: 'arr' }, h('span', { class: 'chip', style: 'background:#7c3aed' }, f.icon),
+      h('div', { class: 'info' }, h('div', { class: 'dest' }, f.name), h('div', { class: 'meta' }, (f.code ? 'Stop ' + f.code + ' · ' : '') + (f.notes && f.notes.length ? f.notes.length + ' walking note' + (f.notes.length > 1 ? 's' : '') : 'no notes'))),
+      h('button', { class: 'xbtn', onclick: () => move(favs, i, -1, FAV.saveList) }, '↑'),
+      h('button', { class: 'xbtn', onclick: () => favEdit(f, () => openFavourites()) }, '✎'))) : h('div', { class: 'note' }, 'None yet – tap ☆ on a place in 🧭 Directions, an address card or a stop.'),
+    h('div', { class: 'grp' }, 'Saved routes'),
+    routes.length ? routes.map((r, i) => h('div', { class: 'arr' }, h('span', { class: 'chip', style: 'background:#7c3aed' }, r.icon || '⭐'),
+      h('div', { class: 'info' }, h('div', { class: 'dest' }, r.name), h('div', { class: 'meta' }, r.J.legs.map(l => onOpts(l).map(o => o.no).join('/')).join(' → '))),
+      h('button', { class: 'xbtn', onclick: () => move(routes, i, -1, FAV.saveRoutes) }, '↑'),
+      h('button', { class: 'xbtn', onclick: () => { const n = prompt('Rename route', r.name); if (n) { r.name = n; FAV.saveRoutes(routes); openFavourites(); } } }, '✎'),
+      h('button', { class: 'xbtn', onclick: () => { if (confirm('Delete "' + r.name + '"?')) { routes.splice(i, 1); FAV.saveRoutes(routes); openFavourites(); } } }, '🗑'))) : h('div', { class: 'note' }, 'None yet – open a route in 🧭 Directions and tap ⭐ Save route.'),
+    h('div', { class: 'row' },
+      h('button', { class: 'pill', onclick: async () => { const t = JSON.stringify({ app: 'sg-bus-map', v: 1, favs: FAV.list(), routes: FAV.routes() }); toast((await copyText(t)) ? '📋 Copied – paste it into Import on your other device' : 'Copy failed'); } }, '📤 Export (copy)'),
+      h('button', { class: 'pill', onclick: favImport }, '📥 Import')));
+  setPanelSummary(() => '⭐ Favourites');
+}
+function favImport() {
+  const ta = h('textarea', { class: 'field', rows: 6, placeholder: 'Paste the exported text here' });
+  setPanelKeyed('favs-import', panelHead('📥 Import favourites', null), h('div', { class: 'sub' }, 'Paste what you exported on your other device. Items with the same name are replaced.'), ta,
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: openFavourites }, 'Cancel'),
+      h('button', { class: 'pill primary', onclick: () => {
+        let d; try { d = JSON.parse(ta.value); } catch { return toast('That text is not an export'); }
+        if (!d || d.app !== 'sg-bus-map') return toast('That text is not an export');
+        const favs = FAV.list(), routes = FAV.routes();
+        for (const f of d.favs || []) { const i = favs.findIndex(x => x.id === f.id || x.name === f.name); if (i >= 0) favs[i] = f; else favs.push(f); }
+        for (const r of d.routes || []) { const i = routes.findIndex(x => x.id === r.id || x.name === r.name); if (i >= 0) routes[i] = r; else routes.push(r); }
+        FAV.saveList(favs); FAV.saveRoutes(routes); toast('📥 Imported ' + (d.favs || []).length + ' places, ' + (d.routes || []).length + ' routes'); openFavourites();
+      } }, 'Import')));
+}
+
+// ---------- start the journey: step by step, reusing waiting + on-board tracking ----------
+function startJourney(J) {
+  state.journey = { J: JSON.parse(JSON.stringify(J)), i: 0 };
+  jStep();
+}
+function jLegCount() { return state.journey ? state.journey.J.legs.length : 0; }
+function jStep() {
+  const JR = state.journey; if (!JR) return;
+  const J = JR.J, i = JR.i, leg = J.legs[i], c = LEG_COLORS[i % 4], last = i === J.legs.length - 1;
+  setPoll(null); clearRoute();
+  enterMode('journey', '🧭 Step ' + (i + 1) + ' of ' + J.legs.length);
+  drawJourney(J);
+  const bll = stopLL(leg.board);
+  map.easeTo({ center: bll, zoom: 16.5, pitch: 50, duration: 800 });
+  map.getSource('sel-stop').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: bll }, properties: {} });
+  const prevA = i > 0 ? onOpts(J.legs[i - 1])[0].alight : null;
+  const here = state.user ? distM(state.user.ll, bll) : null;
+  const how = i === 0 ? (here != null && here > 40 ? '🚶 Walk ' + fmtDist(here * JP.WALK_K) + ' (≈' + walkMins(here * JP.WALK_K) + ' min) to ' : 'Go to ') + stopName(leg.board) + ' · ' + leg.board
+            : prevA === leg.board ? 'Stay at ' + stopName(leg.board) + ' · ' + leg.board : '🚶 Cross / walk ' + fmtDist(distM(stopLL(prevA), bll) * JP.WALK_K) + ' to ' + stopName(leg.board) + ' · ' + leg.board;
+  const list = h('div');
+  const paint = () => {
+    list.innerHTML = '';
+    for (const o of onOpts(leg)) {
+      const R = jpRouteOf(o.no, o.dir), p = R && jpLegPos(R, leg.board, o.alight);
+      list.append(h('div', { class: 'arr tap', onclick: () => jWait(o) }, h('span', { class: 'chip', style: 'background:' + c }, o.no),
+        h('div', { class: 'info' }, h('div', { class: 'dest' }, (p ? (p.ai - p.bi) + ' stops' : '') + ' → ' + stopName(o.alight)), livePills(leg.board, o.no)), h('span', { class: 'meta' }, 'Wait ›')));
+    }
+  };
+  paint();
+  const next = !last ? J.legs[i + 1] : null;
+  setPanelKeyed('jstep:' + i,
+    panelHead('Step ' + (i + 1) + ' of ' + J.legs.length, null, null, async () => { await jpLoadLive([leg.board]); paint(); }),
+    h('div', { class: 'big', style: 'font-size:18px' }, how),
+    h('div', { class: 'sub' }, 'Take ' + onOpts(leg).map(o => o.no).join(' or ') + ' – tap the bus you are waiting for:'),
+    list,
+    h('div', { class: 'meta', style: 'margin-top:6px' }, next ? '🔁 Then change at ' + stopName(onOpts(leg)[0].alight) + ' to ' + onOpts(next).map(o => o.no).join(' / ') : '🏁 Then walk to ' + placeName(J.to)),
+    h('div', { class: 'row' }, h('button', { class: 'pill', onclick: replanHere }, '🔄 Re-plan from here'), h('button', { class: 'pill', onclick: () => confirmRestart() }, 'End journey')));
+  setPanelSummary(() => '🧭 Step ' + (i + 1) + '/' + J.legs.length + ' · ' + onOpts(leg).map(o => o.no).join('/') + ' at ' + stopName(leg.board));
+  const poll = async () => { await jpLoadLive([leg.board]); if (state.mode === 'journey' && panelState.key === 'jstep:' + i) paint(); };
+  setPoll(poll, 30000);
+}
+function jWait(o) {
+  const JR = state.journey, leg = JR.J.legs[JR.i];
+  startWaiting(o.no, leg.board, null);
+  const W = state.wait; if (!W) return;
+  const ai = W.R.codes.findIndex((c, k) => k > W.idx && c === o.alight);
+  if (ai >= 0) { W.alightIdx = ai; updateStops(true); renderWaitPanel(); }
+  W.journey = true;
+  drawJourney(JR.J);
+}
+// called from onArrived(): move on to the next leg (or finish)
+function jArrived(code, no) {
+  const JR = state.journey; if (!JR) return false;
+  const leg = JR.J.legs[JR.i], o = onOpts(leg).find(x => x.no === no) || onOpts(leg)[0];
+  if (!o || (o.alight !== code && distM(stopLL(o.alight), stopLL(code)) > 200)) return false;
+  buzz([200, 100, 200]); beep(2); $('alertBox').hidden = true;
+  stopTrip();
+  if (JR.i < JR.J.legs.length - 1) { JR.i++; toast('🔁 Change here – next: ' + onOpts(JR.J.legs[JR.i]).map(x => x.no).join(' / ')); jStep(); return true; }
+  jFinal(code);
+  return true;
+}
+function jFinal(code) {
+  const JR = state.journey, J = JR.J;
+  setPoll(null); clearRoute();
+  enterMode('journey', '🏁 Arrived');
+  drawJourney(J);
+  const fav = J.to && (J.to.fav ? FAV.list().find(f => f.id === J.to.fav) : FAV.near(J.to.ll));
+  const note = FAV.noteFor(fav, code), d = J.to && J.to.ll ? distM(stopLL(code), J.to.ll) * JP.WALK_K : 0;
+  const bb = new maplibregl.LngLatBounds(); bb.extend(stopLL(code)); if (J.to && J.to.ll) bb.extend(J.to.ll);
+  map.fitBounds(bb, { padding: { top: 110, bottom: Math.min(innerHeight * 0.6, $('panel').offsetHeight || 260) + 50, left: 70, right: 90 }, maxZoom: 17.5, pitch: 40, duration: 800 });
+  setPanelKeyed('jfinal',
+    panelHead('🏁 You have arrived', null),
+    h('div', { class: 'sub' }, stopName(code) + ' · ' + code),
+    h('div', { class: 'big', style: 'font-size:18px' }, '🚶 Walk ' + fmtDist(d) + ' (≈' + walkMins(d) + ' min) to ' + placeName(J.to)),
+    note ? h('div', { class: 'jnote' }, '📝 ' + note) : null,
+    !fav && J.to && !J.to.me ? h('button', { class: 'pill', onclick: () => favEdit(J.to) }, '☆ Save ' + placeName(J.to) + ' as a favourite') : null,
+    h('div', { class: 'row' }, h('button', { class: 'pill primary', onclick: resetAll }, 'Finish')));
+  setPanelSummary(() => '🏁 Walk to ' + placeName(J.to));
+}
+function replanHere() {
+  const JR = state.journey; if (!JR) return;
+  const to = JR.J.to;
+  const here = state.user && Date.now() - state.user.t < 60000 ? myPlace() : stopPlace(JR.J.legs[JR.i].board);
+  state.journey = null; state.wait = null; stopTrip();
+  PLAN.from = here; PLAN.to = to;
+  openDirections({ from: here, to });
+  planSearch();
+}
+// a line in the on-board / waiting panels while on a journey
+function jTripLine() {
+  const JR = state.journey; if (!JR) return null;
+  const J = JR.J, i = JR.i, next = J.legs[i + 1];
+  return h('div', { class: 'jnote', style: 'margin:4px 0' },
+    '🧭 Step ' + (i + 1) + '/' + J.legs.length + ' · ' + (next ? 'then change to ' + onOpts(next).map(o => o.no).join(' / ') + ' at ' + stopName(next.board) : 'then walk to ' + placeName(J.to)),
+    ' ', h('button', { class: 'pill', style: 'padding:3px 9px;font-size:13px', onclick: replanHere }, 'Re-plan'));
+}
+
 // ======================= RESTART / SETTINGS =======================
 function confirmRestart() { $('confirmRestart').hidden = false; }
 $('restartBtn').onclick = confirmRestart;
@@ -3539,6 +4460,7 @@ function resetAll() {
   setPoll(null);
   stopTrip();
   state.setup = state.wait = state.arrived = null;
+  state.journey = null; PLAN.pick = null; if (typeof jrClear === 'function') jrClear();
   state.userMoved = false;
   enterMode('browse');
   clearRoute(); hidePanel();
@@ -3606,6 +4528,8 @@ async function openCredits() {
 }
 $('creditOk').onclick = () => { $('creditBox').hidden = true; };
 $('creditBox').addEventListener('click', e => { if (e.target === $('creditBox')) $('creditBox').hidden = true; });
+$('favsBtn').onclick = () => openFavourites();
+$('planBtn').onclick = () => openDirections();
 $('ltTestBtn').onclick = () => { $('settings').hidden = true; setTimeout(ltTest, 300); };
 $('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Oriole', 'Crow', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).checked = SND.on(k.toLowerCase());
   $('callVol').value = Math.round(callVol() * 80);
