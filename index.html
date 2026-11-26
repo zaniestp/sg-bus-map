@@ -405,7 +405,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '4.2', APP_DATE = '25 Nov 2026';
+const APP_VERSION = '4.3', APP_DATE = '25 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -1294,7 +1294,14 @@ function pickBuilding(point, ground, near) {
   return idx;
 }
 // ---------- address card: tap a building to see its full address ----------
-const titleCase = x => String(x || '').toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+// "OG ALBERT COMPLEX" → "OG Albert Complex": keep acronyms and short brand names in capitals
+const KEEP_CAPS = new Set(['HDB', 'NTUC', 'ITE', 'SAFRA', 'CHIJ', 'MRT', 'LRT', 'YMCA', 'YWCA', 'NUS', 'NTU', 'SMU', 'SIM', 'SUTD', 'SUSS', 'IMM', 'JTC', 'MOE', 'ACS', 'SJI', 'CC', 'RC', 'CPF', 'IRAS', 'ICA', 'MOM', 'SGH', 'KKH', 'TTSH', 'NUH', 'CGH', 'KTPH', 'NHCS', 'NCC', 'PSA', 'SBS', 'SMRT', 'DBS', 'OCBC', 'UOB', 'POSB', 'SPH', 'NEX', 'JEM', 'AMK', 'TPY', 'PIE', 'CTE', 'AYE', 'BKE', 'KJE', 'SLE', 'TPE', 'ECP', 'KPE', 'MCE', 'II', 'III', 'IV']);
+const LOWER_2 = new Set(['ST', 'DR', 'RD', 'CL', 'PL', 'LK', 'PK', 'BT', 'OF', 'AT', 'ON', 'IN', 'BY', 'TO', 'NO', 'DE', 'LA', 'EL']);
+const titleCase = x => String(x || '').split(/(\s+|-|\/|\(|\))/).map(w => {
+  const u = w.toUpperCase();
+  if (KEEP_CAPS.has(u) || (/^[A-Z]{2}$/.test(u) && !LOWER_2.has(u) && w === u) || /\d/.test(w)) return u;
+  return w.toLowerCase().replace(/^[a-z]/, c => c.toUpperCase());
+}).join('');
 function addrLines(a) {                    // → { main, sub, copy }
   const name = a.n && a.n !== 'NIL' && !/^HDB/i.test(a.n) ? titleCase(a.n) : '';
   const blk = a.b && a.b !== 'NIL' ? (a.h ? 'Blk ' : '') + a.b : '';
@@ -1352,7 +1359,8 @@ async function addrSearch(q) {
 }
 function scheduleAddrSearch(q) {
   clearTimeout(ADDR.t); const my = ++ADDR.seq;
-  if (!looksLikeAddress(q.trim())) return;
+  const qq = q.trim();
+  if (!looksLikeAddress(qq) && !(qq.length >= 3 && /[a-z]{3}/i.test(qq))) return;   // postal codes, blocks – and building names
   ADDR.t = setTimeout(async () => {
     let res = []; try { res = await addrSearch(q); } catch {}
     if (my !== ADDR.seq || document.activeElement !== $('q')) return;
@@ -1360,7 +1368,7 @@ function scheduleAddrSearch(q) {
     box.querySelectorAll('.addrres').forEach(x => x.remove());
     if (!res.length) return;
     const nores = box.querySelector('.note'); if (nores) nores.remove();
-    box.append(h('div', { class: 'reshead addrres' }, 'Addresses (OneMap)'));
+    box.append(h('div', { class: 'reshead addrres' }, 'Addresses & buildings (OneMap)'));
     for (const a of res.slice(0, 8)) { const L = addrLines(a);
       box.append(h('div', { class: 'res addrres', onclick: () => { hideResults(); goToAddress(a); } },
         h('span', { class: 'ic road' }, '🏢'), h('div', { class: 'tx' }, L.main, h('small', null, L.sub)))); }
@@ -2905,6 +2913,38 @@ function renderResults(r) {
   box.hidden = false; box.scrollTop = 0;
 }
 function hideResults() { clearTimeout(searchT); $('results').hidden = true; $('q').blur(); }
+function favMatches(q) {
+  const ql = q.trim().toLowerCase(); if (ql.length < 2) return [];
+  return FAV.list().filter(f => (f.name + ' ' + (f.details || '') + ' ' + (f.addr || '')).toLowerCase().includes(ql));
+}
+function renderFavResults(q) {                 // your favourites come first in the search list
+  const fs = favMatches(q); if (!fs.length) return;
+  const box = $('results'), first = box.firstChild;
+  const nores = box.querySelector('.note'); if (nores) nores.remove();
+  const head = h('div', { class: 'reshead' }, '⭐ Your favourites');
+  box.insertBefore(head, first);
+  for (const f of fs.slice(0, 5)) box.insertBefore(h('div', { class: 'res', onclick: () => { hideResults(); goToFav(f); } },
+    h('span', { class: 'ic road' }, f.icon), h('div', { class: 'tx' }, f.name, h('small', null, [f.details, f.addr].filter(Boolean).join(' · ') || (f.code ? 'Stop ' + f.code : 'Favourite')))), first);
+  box.hidden = false;
+}
+function goToFav(f) {
+  $('q').value = f.name;
+  if (f.code) return goToStop(f.code);
+  map.flyTo({ center: f.ll, zoom: 18, pitch: Math.max(map.getPitch(), 45), duration: 1200 });
+  map.once('moveend', () => setTimeout(() => { favCard(f); }, 900));
+}
+function favCard(f) {                          // the address card, for one of your favourites
+  closeStopCard();
+  const box = $('addrCard'); box.innerHTML = '';
+  const copy = [f.name, f.details, f.addr].filter(Boolean).join(', ');
+  const btn = h('button', { onclick: async () => { btn.textContent = (await copyText(copy)) ? '✓ Copied' : 'Copy failed'; setTimeout(() => btn.textContent = '📋 Copy', 1800); } }, '📋 Copy');
+  box.append(h('div', { class: 'hd' }, h('span', null, f.icon + ' ' + f.name), h('button', { onclick: closeAddrCard, 'aria-label': 'Close' }, '✕')),
+    h('div', { class: 'ad' }, h('div', { class: 'at' }, f.details ? h('b', null, f.details) : null, h('small', null, f.addr || 'Saved place')),
+      h('div', { style: 'display:flex;flex-direction:column;gap:4px' }, btn,
+        state.mode === 'browse' ? h('button', { onclick: () => openDirections({ to: favPlace(f) }) }, '🧭 Go') : null,
+        h('button', { onclick: () => favEdit(f, nf => nf ? favCard(nf) : closeAddrCard()) }, '✎ Edit'))));
+  box.hidden = false;
+}
 function goToStop(code, keepRoad) {
   const st = state.stops[code]; if (!st) return;
   $('q').value = st[2];
@@ -2927,7 +2967,7 @@ function showRoad(rd) {
       h('div', { class: 'nm' }, x.st[2], h('small', null, x.code + ' · ' + (state.stopServices[x.code] || []).join(', '))),
       h('span', { class: 'meta' }, fmtDist(x.d))))));
 }
-$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) { renderResults(runSearch($('q').value)); scheduleAddrSearch($('q').value); } }, 120); });
+$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) { renderResults(runSearch($('q').value)); renderFavResults($('q').value); scheduleAddrSearch($('q').value); } }, 120); });
 $('q').addEventListener('focus', () => { if ($('q').value.trim()) renderResults(runSearch($('q').value)); });
 $('q').addEventListener('keydown', e => { if (e.key === 'Escape') hideResults(); });
 map.on('movestart', e => { if (e.originalEvent) $('results').hidden = true; });
@@ -3851,12 +3891,14 @@ const FAV_ICONS = ['⭐', '🏠', '🏫', '🏢', '🏥', '🛒', '🍽', '❤�
 function favEdit(base, onSaved) {
   const list = FAV.list();
   const fav = base.id ? JSON.parse(JSON.stringify(list.find(f => f.id === base.id) || base))
-                      : { id: 'f' + Date.now().toString(36), icon: base.code ? '🚏' : '⭐', name: placeName(base).replace(/\s*\(\d{5}\)$/, ''), ll: base.ll, code: base.code || null, notes: [] };
+                      : { id: 'f' + Date.now().toString(36), icon: base.code ? '🚏' : '⭐', name: placeName(base).replace(/\s*\(\d{5}\)$/, ''), ll: base.ll, code: base.code || null, notes: [],
+                          details: '', addr: base.addr ? addrLines(base.addr).copy : base.code ? stopName(base.code) + ' · ' + base.code : '' };
   const box = h('div', { class: 'modal' }), dlg = h('div', { class: 'dlg' });
   const icons = h('div', { class: 'favicons' });
   const paintIcons = () => { icons.innerHTML = ''; for (const ic of (fav.code ? ['🚏'] : []).concat(FAV_ICONS)) icons.append(h('button', { class: 'pill' + (fav.icon === ic ? ' primary' : ''), onclick: () => { fav.icon = ic; paintIcons(); } }, ic)); };
   paintIcons();
   const name = h('input', { class: 'field', value: fav.name, placeholder: 'Name, e.g. School' });
+  const details = h('input', { class: 'field', value: fav.details || '', placeholder: 'Details, e.g. Unit #06-07 to 12', style: 'margin-top:6px' });
   // stops near the place, for "when you alight at…" notes
   const nearStops = Object.entries(state.stops).map(([c, s]) => ({ c, d: distM(fav.ll, [s[0], s[1]]) })).filter(x => x.d <= 700).sort((a, b) => a.d - b.d).slice(0, 15);
   const notesBox = h('div');
@@ -3873,7 +3915,8 @@ function favEdit(base, onSaved) {
   };
   paintNotes();
   const close = () => box.remove();
-  dlg.append(h('h2', null, (base.id ? 'Edit' : 'Save') + ' favourite'), icons, name,
+  dlg.append(h('h2', null, (base.id ? 'Edit' : 'Save') + ' favourite'), icons, name, details,
+    fav.addr ? h('div', { class: 'meta', style: 'margin-top:4px' }, '📍 ' + fav.addr) : null,
     h('h3', null, 'Walking notes'), h('div', { class: 'sub' }, 'Shown at the end of a journey here – one per stop you might alight at.'),
     notesBox, h('button', { class: 'pill', onclick: () => { fav.notes.push({ stop: nearStops[0] ? nearStops[0].c : '*', text: '' }); paintNotes(); } }, '＋ Add a note'),
     h('div', { class: 'row', style: 'margin-top:14px' },
@@ -3881,7 +3924,7 @@ function favEdit(base, onSaved) {
       h('span', { style: 'flex:1' }),
       h('button', { class: 'pill', onclick: close }, 'Cancel'),
       h('button', { class: 'pill primary', onclick: () => {
-        fav.name = name.value.trim() || 'Favourite'; fav.notes = fav.notes.filter(n => n.text.trim());
+        fav.name = name.value.trim() || 'Favourite'; fav.details = details.value.trim(); fav.notes = fav.notes.filter(n => n.text.trim());
         const all = FAV.list(), i = all.findIndex(f => f.id === fav.id);
         if (i >= 0) all[i] = fav; else all.push(fav);
         FAV.saveList(all); close(); toast(fav.icon + ' Saved: ' + fav.name); onSaved && onSaved(fav);
@@ -3889,7 +3932,8 @@ function favEdit(base, onSaved) {
   box.append(dlg); box.addEventListener('click', e => { if (e.target === box) close(); });
   document.body.append(box);
 }
-const favPlace = f => ({ label: f.icon + ' ' + f.name, ll: f.ll, code: f.code || null, fav: f.id });
+const favPlace = f => ({ label: f.icon + ' ' + f.name, ll: f.ll, code: f.code || null, fav: f.id, details: f.details || '' });
+const favDetails = p => { if (!p) return ''; if (p.fav) { const f = FAV.list().find(x => x.id === p.fav); if (f) return f.details || ''; } return p.details || ''; };
 
 // ---------- journey model: legs by stop codes (stable – can be saved) ----------
 // J = { from, to, legs: [{ board, walkFrom, opts: [{ no, dir, alight, off }] }] }
@@ -4069,7 +4113,7 @@ function renderPlanForm() {
       items.push(['🚏 Pick a stop on the map', 'The panel hides – tap any bus stop', () => stopPickStart(which, true)]);
     }
     const ql = q.toLowerCase();
-    for (const f of FAV.list()) if (!q || f.name.toLowerCase().includes(ql)) items.push([f.icon + ' ' + f.name, f.code ? 'Stop ' + f.code : 'Favourite', () => choose(favPlace(f))]);
+    for (const f of FAV.list()) if (!q || (f.name + ' ' + (f.details || '') + ' ' + (f.addr || '')).toLowerCase().includes(ql)) items.push([f.icon + ' ' + f.name, [f.details, f.code ? 'Stop ' + f.code : f.addr].filter(Boolean).join(' · ') || 'Favourite', () => choose(favPlace(f))]);
     if (q.length >= 2) {
       const r = runSearch(q);
       for (const x of (r && r.stops || []).slice(0, 6)) items.push(['🚏 ' + x.st[2], x.code + ' · ' + x.st[3] + ' · ' + (state.stopServices[x.code] || []).slice(0, 6).join(', '), () => choose(stopPlace(x.code))]);
@@ -4093,7 +4137,7 @@ function renderPlanForm() {
     planTabs(),
     routes.length ? h('div', { class: 'jsaved' }, routes.slice(0, 6).map(r => h('button', { class: 'pill', onclick: () => openSavedRoute(r) }, (r.icon || '⭐') + ' ' + r.name))) : null,
     p ? h('div', { class: 'jchosen' },
-      h('div', null, h('b', null, placeName(p)), h('div', { class: 'meta' }, p.code ? '🚏 This is a bus stop' : sc ? '🚏 ' + (which === 'from' ? 'Board at ' : 'Get off at ') + stopName(sc) + ' · ' + sc + ' · ' + fmtDist(distM(p.ll, stopLL(sc))) : '✨ The app chooses the best stop')),
+      h('div', null, h('b', null, placeName(p)), favDetails(p) ? h('div', { class: 'meta' }, '🏷 ' + favDetails(p)) : null, h('div', { class: 'meta' }, p.code ? '🚏 This is a bus stop' : sc ? '🚏 ' + (which === 'from' ? 'Board at ' : 'Get off at ') + stopName(sc) + ' · ' + sc + ' · ' + fmtDist(distM(p.ll, stopLL(sc))) : '✨ The app chooses the best stop')),
       h('div', { class: 'row', style: 'margin:6px 0 0' },
         !p.code ? h('button', { class: 'pill', onclick: () => stopPickStart(which) }, '🚏 Change stop') : null,
         !p.me && !p.fav ? h('button', { class: 'pill', onclick: () => favEdit(p, f => { if (f) { PLAN[which] = favPlace(f); renderPlanForm(); } }) }, '☆ Save') : null,
@@ -4285,7 +4329,7 @@ function openPlanDetail(J, keepEdit) {
   const lastO = onOpts(J.legs[J.legs.length - 1])[0];
   const note = FAV.noteFor(fav, lastO.alight);
   steps.push(h('div', { class: 'jstep' }, h('span', { class: 'jdot', style: 'background:#dc2626' }, 'B'),
-    h('div', null, h('b', null, placeName(J.to)), h('div', { class: 'meta' }, '🚶 Walk ' + fmtDist(ev.egressM) + ' (≈' + walkMins(ev.egressM) + ' min) from ' + stopName(lastO.alight)),
+    h('div', null, h('b', null, placeName(J.to)), favDetails(J.to) ? h('div', { class: 'meta' }, '🏷 ' + favDetails(J.to)) : null, h('div', { class: 'meta' }, '🚶 Walk ' + fmtDist(ev.egressM) + ' (≈' + walkMins(ev.egressM) + ' min) from ' + stopName(lastO.alight)),
       note ? h('div', { class: 'jnote' }, '📝 ' + note) : null)));
   setPanelKeyed('plan-detail',
     panelHead('≈ ' + Math.round(ev.T) + ' min · arrive ≈ ' + clock(ev.T), null, null, async () => { await jpLoadLive(J.legs.map(l => l.board)); openPlanDetail(J, true); }),
@@ -4538,6 +4582,7 @@ function jFinal(code) {
     panelHead('🏁 You have arrived', null),
     h('div', { class: 'sub' }, stopName(code) + ' · ' + code),
     h('div', { class: 'big', style: 'font-size:18px' }, '🚶 Walk ' + fmtDist(d) + ' (≈' + walkMins(d) + ' min) to ' + placeName(J.to)),
+    favDetails(J.to) ? h('div', { class: 'sub' }, '🏷 ' + favDetails(J.to)) : null,
     note ? h('div', { class: 'jnote' }, '📝 ' + note) : null,
     !fav && J.to && !J.to.me ? h('button', { class: 'pill', onclick: () => favEdit(J.to) }, '☆ Save ' + placeName(J.to) + ' as a favourite') : null,
     h('div', { class: 'row' }, h('button', { class: 'pill primary', onclick: resetAll }, 'Finish')));
