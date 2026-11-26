@@ -121,6 +121,10 @@
   .selsvc small { display: block; color: var(--muted); font-size: 12px; }
   .err { font-size: 14px; color: #b71c1c; background: #ffebee; border-radius: 10px; padding: 10px; margin: 6px 0; }
   .arr.off { opacity: .45; }
+  .arr.fav { background: rgba(250,204,21,.13); border-radius: 10px; }
+  .arr.off.fav { opacity: .7; }
+  .starbtn { border: 0; background: none; font-size: 20px; line-height: 1; padding: 2px; color: #94a3b8; cursor: pointer; flex: none; }
+  .starbtn.on { color: #eab308; }
   .trackbtn { border: 0; background: var(--red); color: #fff; font-weight: 700; border-radius: 999px; padding: 8px 12px; font-size: 14px; cursor: pointer; flex: none; }
   .legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
   .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; background: var(--c); }
@@ -324,6 +328,7 @@
   <div class="dlg">
     <h1 id="settingsTitle">⚙ Settings</h1>
     <button class="btn" id="favsBtn" style="width:100%;margin-bottom:8px">⭐ Favourites &amp; saved routes</button>
+    <button class="btn" id="helpBtn" style="width:100%;margin-bottom:8px">❓ Help &amp; manual</button>
     <h2>Live data proxy</h2>
     <p>Your Cloudflare Worker URL. Your LTA key stays inside the Worker.</p>
     <input id="apiInput" class="field" type="url" placeholder="https://…workers.dev" inputmode="url">
@@ -408,7 +413,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '5.0.1', APP_DATE = '26 Nov 2026';
+const APP_VERSION = '5.0.2', APP_DATE = '27 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -3018,8 +3023,34 @@ function showRoad(rd) {
       h('div', { class: 'nm' }, x.st[2], h('small', null, x.code + ' · ' + (state.stopServices[x.code] || []).join(', '))),
       h('span', { class: 'meta' }, fmtDist(x.d))))));
 }
-$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) { renderResults(runSearch($('q').value)); renderFavResults($('q').value); scheduleAddrSearch($('q').value); } }, 120); });
-$('q').addEventListener('focus', () => { if ($('q').value.trim()) renderResults(runSearch($('q').value)); });
+$('q').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => { if (document.activeElement === $('q')) { if (!$('q').value.trim()) { $('results').hidden = true; return renderMyStops(); } renderResults(runSearch($('q').value)); renderFavResults($('q').value); scheduleAddrSearch($('q').value); } }, 120); });
+$('q').addEventListener('focus', () => { if ($('q').value.trim()) renderResults(runSearch($('q').value)); else renderMyStops(); });
+// ⭐ My stops: saved stops with their pinned buses' next times, shown when the search box is empty
+async function renderMyStops() {
+  const stops = FAV.list().filter(f => f.code && (isStn(f.code) ? RAIL.by[f.code] : state.stops[f.code]));
+  if (!stops.length) return;
+  const box = $('results'); box.innerHTML = '';
+  box.append(h('div', { class: 'reshead' }, '⭐ My stops'));
+  const rows = {};
+  for (const f of stops.slice(0, 12)) {
+    const sm = h('small', null, isStn(f.code) ? RAIL.by[f.code].codes.join(' · ') + ' · ' + stnLines(RAIL.by[f.code]) : f.code + ' · …');
+    rows[f.code] = sm;
+    box.append(h('div', { class: 'res', onclick: () => { hideResults(); goToFav(f); } }, h('span', { class: 'ic road' }, f.icon), h('div', { class: 'tx' }, f.name, sm)));
+  }
+  box.hidden = false;
+  const codes = stops.slice(0, 12).map(f => f.code).filter(c => !isStn(c));
+  if (!codes.length || !API) return;
+  let data; try { data = await api('/multi-arrival?stops=' + codes.join(',')); } catch { for (const c of codes) rows[c].textContent = c + ' · ' + (SVCFAV.get(c).length ? '★ ' + SVCFAV.get(c).sort(svcCmp).join(', ') : (state.stopServices[c] || []).slice(0, 6).join(', ')); return; }
+  if ($('q').value.trim()) return;                    // user started typing meanwhile
+  for (const c of codes) {
+    const live = ((data.stops || {})[c] || []).filter(sv => sv.buses && sv.buses.length), stars = SVCFAV.get(c);
+    const t = sv => { const m = minsUntil(parseEta(sv.buses[0].eta)); return sv.ServiceNo + ' ' + (m == null ? '–' : m <= 0 ? 'Arr' : m + ' min'); };
+    let txt;
+    if (stars.length) txt = stars.slice().sort(svcCmp).map(no => { const sv = live.find(x => x.ServiceNo === no); return '★ ' + (sv ? t(sv) : no + ' –'); }).join(' · ');
+    else txt = live.slice().sort((a, b) => (parseEta(a.buses[0].eta) || Infinity) - (parseEta(b.buses[0].eta) || Infinity)).slice(0, 3).map(t).join(' · ') || 'no buses now';
+    rows[c].textContent = c + ' · ' + txt;
+  }
+}
 $('q').addEventListener('keydown', e => { if (e.key === 'Escape') hideResults(); });
 map.on('movestart', e => { if (e.originalEvent) $('results').hidden = true; });
 map.on('click', () => { $('results').hidden = true; });
@@ -3055,17 +3086,24 @@ function openStop(code) {
   updateShelters(code);
   const arrivals = h('div', { id: 'arrivals' }, h('div', { class: 'note' }, 'Loading live arrivals…'));
   state.stopFirst = null;
+  const saved = FAV.list().find(f => f.code === code);
+  const sortSw = h('div', { class: 'jopts', style: 'margin:2px 0 4px' });
+  const paintSort = () => { sortSw.innerHTML = ''; const m = store.get('arrSort') || 'num';
+    for (const [k, t] of [['num', '🔢 By number'], ['soon', '⏱ Soonest first']]) sortSw.append(h('button', { class: 'pill sm' + (m === k ? ' primary' : ''), onclick: () => { store.set('arrSort', k); paintSort(); loadArrivals(code); } }, t)); };
+  paintSort();
   setPanelKeyed('stop:' + code,
-    panelHead(st[2], closeStop, null, () => loadArrivals(code)),
+    panelHead((saved ? '★ ' : '') + st[2], closeStop, null, () => loadArrivals(code)),
     h('div', { class: 'sub' }, code + ' · ' + st[3] + (state.user ? ' · ' + fmtDist(distM(state.user.ll, [st[0], st[1]])) + ' away' : '')),
     (state.R && (state.stopServices[code] || []).includes(state.R.no)) ? h('div', { id: 'selSvc' }) : null,
     h('h3', null, 'Live arrivals ', h('span', { id: 'arrUpdated', style: 'text-transform:none;letter-spacing:0' })),
+    sortSw,
     arrivals,
     legend(),
     h('div', { class: 'row' }, h('button', { class: 'pill', onclick: () => openDirections({ to: stopPlace(code) }) }, '🧭 Directions here'),
       h('button', { class: 'pill', onclick: () => openDirections({ from: stopPlace(code) }) }, '🧭 From here'),
-      h('button', { class: 'pill', onclick: () => favEdit(stopPlace(code)) }, '☆ Save stop')),
-    h('div', { class: 'note', style: 'font-size:12px' }, 'Tap a bus number to see its route · tap Track to follow the next bus coming here.'));
+      saved ? h('button', { class: 'pill primary', onclick: () => favEdit(saved, () => openStop(code)) }, '★ Saved stop')
+            : h('button', { class: 'pill', onclick: () => favEdit(stopPlace(code), () => openStop(code)) }, '☆ Save stop')),
+    h('div', { class: 'note', style: 'font-size:12px' }, 'Tap ☆ to pin a bus to the top at this stop · tap a bus number to see its route · tap Track to follow the next bus coming here.'));
   setPanelSummary(() => '🚏 ' + st[2] + (st[2].length <= 16 ? ' ' + code : '') + (state.stopFirst ? ' · ' + state.stopFirst : ''));
   map.easeTo({ center: [st[0], st[1]], zoom: Math.max(map.getZoom(), 16), duration: 700 });
   clearInterval(state.sheetTimer);
@@ -3101,34 +3139,64 @@ function showRouteFrom(no, code) {
   const d = sv.routes.findIndex(r => r.includes(code));
   showService(no, Math.max(0, d)); openStop(code);
 }
+// ---------- favourite buses per stop (★ pinned to the top) ----------
+const SVCFAV = {
+  all() { try { return JSON.parse(store.get('favSvc') || '{}'); } catch { return {}; } },
+  get(code) { return SVCFAV.all()[code] || []; },
+  toggle(code, no) {
+    const a = SVCFAV.all(), l = a[code] || [], i = l.indexOf(no);
+    if (i >= 0) l.splice(i, 1); else l.push(no);
+    if (l.length) a[code] = l; else delete a[code];
+    store.set('favSvc', JSON.stringify(a));
+    toast(i >= 0 ? '☆ ' + no + ' unpinned' : '★ ' + no + ' pinned to the top at this stop');
+  }
+};
+// natural bus-number order: 2, 10, 67, 168, 168A, 298, 903, 903M
+function svcCmp(a, b) {
+  const ma = /^(\d*)(.*)$/.exec(a), mb = /^(\d*)(.*)$/.exec(b);
+  const na = ma[1] === '' ? Infinity : +ma[1], nb = mb[1] === '' ? Infinity : +mb[1];
+  return na - nb || ma[2].localeCompare(mb[2]) || a.localeCompare(b);
+}
+function starBtn(code, no) {
+  const on = SVCFAV.get(code).includes(no);
+  return h('button', { class: 'starbtn' + (on ? ' on' : ''), title: on ? 'Unpin' : 'Pin to the top', 'aria-label': on ? 'Unpin ' + no : 'Pin ' + no,
+    onclick: e => { e.stopPropagation(); SVCFAV.toggle(code, no); loadArrivals(code); } }, on ? '★' : '☆');
+}
 async function loadArrivals(code) {
   const box = $('arrivals'); if (!box) return;
-  const all = state.stopServices[code] || [];
+  const all = (state.stopServices[code] || []).slice();
+  const stars = SVCFAV.get(code), starred = no => stars.includes(no);
+  const bySoon = (store.get('arrSort') || 'num') === 'soon';
+  const offRow = (no, meta) => h('div', { class: 'arr off' + (starred(no) ? ' fav' : '') }, starBtn(code, no),
+    h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no),
+    h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no] ? state.services[no].name : ''), meta ? h('div', { class: 'meta' }, meta) : null));
   try {
     const data = await api('/multi-arrival?stops=' + code);
     if (state.sheetStop !== code || !$('arrivals')) return;
+    const eta = sv => parseEta(sv.buses[0].eta) || Infinity;
     const live = ((data.stops || {})[code] || []).filter(sv => sv.buses && sv.buses.length)
-      .sort((a, b) => (parseEta(a.buses[0].eta) || Infinity) - (parseEta(b.buses[0].eta) || Infinity));
+      .sort((a, b) => (starred(b.ServiceNo) - starred(a.ServiceNo)) || (starred(a.ServiceNo) || !bySoon ? svcCmp(a.ServiceNo, b.ServiceNo) : eta(a) - eta(b)));
     box.innerHTML = '';
     if (!live.length) box.append(h('div', { class: 'note' }, 'No buses arriving right now (services may have ended for the day).'));
+    const liveNos = new Set(live.map(x => x.ServiceNo));
+    const offNos = all.filter(n => !liveNos.has(n)).sort(svcCmp);
+    // starred buses that aren't running still go at the top
+    for (const no of offNos.filter(starred)) box.append(offRow(no, 'No live arrival'));
     for (const sv of live) {
       const b0 = sv.buses[0] || {};
       const canTrack = state.services[sv.ServiceNo] && boardableDir(sv.ServiceNo, code) >= 0;
-      box.append(h('div', { class: 'arr' },
+      box.append(h('div', { class: 'arr' + (starred(sv.ServiceNo) ? ' fav' : '') },
+        starBtn(code, sv.ServiceNo),
         h('button', { class: 'chip' + (state.R && state.R.no === sv.ServiceNo ? ' current' : ''), onclick: () => showRouteFrom(sv.ServiceNo, code) }, sv.ServiceNo),
         h('div', { class: 'info' },
           h('div', { class: 'dest' }, '→ ' + (b0.dest ? stopName(b0.dest) : '') + (b0.type ? ' · ' + (TYPE_TXT[b0.type] || b0.type) : '') + (b0.feature === 'WAB' ? ' · ♿' : '')),
           h('div', { class: 'times' }, timePills(sv.buses))),
         canTrack ? h('button', { class: 'trackbtn', onclick: () => startWaiting(sv.ServiceNo, code, null) }, 'Track ▶') : null));
     }
+    for (const no of offNos.filter(n => !starred(n))) box.append(offRow(no, 'No live arrival'));
     renderSelSvc(code, live);
-    state.stopFirst = live.length ? live[0].ServiceNo + ' in ' + fmtMins(minsUntil(parseEta(live[0].buses[0].eta))) : 'no live arrivals';
-    const liveNos = new Set(live.map(x => x.ServiceNo));
-    for (const no of all.filter(n => !liveNos.has(n))) {
-      box.append(h('div', { class: 'arr off' },
-        h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no),
-        h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no].name), h('div', { class: 'meta' }, 'No live arrival'))));
-    }
+    const fst = live.find(x => starred(x.ServiceNo)) || live.slice().sort((a, b) => eta(a) - eta(b))[0];
+    state.stopFirst = fst ? (starred(fst.ServiceNo) ? '★ ' : '') + fst.ServiceNo + ' in ' + fmtMins(minsUntil(parseEta(fst.buses[0].eta))) : 'no live arrivals';
     if ($('arrUpdated')) $('arrUpdated').textContent = '· ' + hhmm();
   } catch (e) {
     if (state.sheetStop !== code || !$('arrivals')) return;
@@ -3136,7 +3204,7 @@ async function loadArrivals(code) {
     box.append(e.silent ? quietNote() : h('div', { class: 'err' }, '⚠ Live arrivals unavailable: ' + e.message + '. Tap ⚙ → Test to check the proxy.'));
     if (e.silent && $('selSvc')) $('selSvc').remove();
     state.stopFirst = null;
-    for (const no of all) box.append(h('div', { class: 'arr off' }, h('button', { class: 'chip', onclick: () => showRouteFrom(no, code) }, no), h('div', { class: 'info' }, h('div', { class: 'dest' }, state.services[no].name))));
+    for (const no of all.sort((a, b) => (starred(b) - starred(a)) || svcCmp(a, b))) box.append(offRow(no, ''));
   }
 }
 
@@ -4778,7 +4846,7 @@ function openFavourites() {
       h('button', { class: 'xbtn', onclick: () => { const n = prompt('Rename route', r.name); if (n) { r.name = n; FAV.saveRoutes(routes); openFavourites(); } } }, '✎'),
       h('button', { class: 'xbtn', onclick: () => { if (confirm('Delete "' + r.name + '"?')) { routes.splice(i, 1); FAV.saveRoutes(routes); openFavourites(); } } }, '🗑'))) : h('div', { class: 'note' }, 'None yet – open a route in 🧭 Directions and tap ⭐ Save route.'),
     h('div', { class: 'row' },
-      h('button', { class: 'pill', onclick: async () => { const t = JSON.stringify({ app: 'sg-bus-map', v: 1, favs: FAV.list(), routes: FAV.routes() }); toast((await copyText(t)) ? '📋 Copied – paste it into Import on your other device' : 'Copy failed'); } }, '📤 Export (copy)'),
+      h('button', { class: 'pill', onclick: async () => { const t = JSON.stringify({ app: 'sg-bus-map', v: 1, favs: FAV.list(), routes: FAV.routes(), svc: SVCFAV.all() }); toast((await copyText(t)) ? '📋 Copied – paste it into Import on your other device' : 'Copy failed'); } }, '📤 Export (copy)'),
       h('button', { class: 'pill', onclick: favImport }, '📥 Import')));
   setPanelSummary(() => '⭐ Favourites');
 }
@@ -4792,7 +4860,10 @@ function favImport() {
         const favs = FAV.list(), routes = FAV.routes();
         for (const f of d.favs || []) { const i = favs.findIndex(x => x.id === f.id || x.name === f.name); if (i >= 0) favs[i] = f; else favs.push(f); }
         for (const r of d.routes || []) { const i = routes.findIndex(x => x.id === r.id || x.name === r.name); if (i >= 0) routes[i] = r; else routes.push(r); }
-        FAV.saveList(favs); FAV.saveRoutes(routes); toast('📥 Imported ' + (d.favs || []).length + ' places, ' + (d.routes || []).length + ' routes'); openFavourites();
+        const sv = SVCFAV.all();
+        for (const [c, l] of Object.entries(d.svc || {})) if (Array.isArray(l)) sv[c] = [...new Set((sv[c] || []).concat(l))];
+        store.set('favSvc', JSON.stringify(sv));
+        FAV.saveList(favs); FAV.saveRoutes(routes); toast('📥 Imported ' + (d.favs || []).length + ' places, ' + (d.routes || []).length + ' routes' + (d.svc ? ', pinned buses' : '')); openFavourites();
       } }, 'Import')));
 }
 
@@ -5203,6 +5274,14 @@ async function openCredits() {
 $('creditOk').onclick = () => { $('creditBox').hidden = true; };
 $('creditBox').addEventListener('click', e => { if (e.target === $('creditBox')) $('creditBox').hidden = true; });
 $('favsBtn').onclick = () => openFavourites();
+// ❓ Help: the manual (README) in a new tab – in the phone's language when it's one of ours (Google Translate)
+const HELP_URL = 'https://github.com/zaniestp/sg-bus-map';
+$('helpBtn').onclick = () => {
+  const lang = (navigator.language || 'en').toLowerCase(), pre = lang.split('-')[0];
+  const tl = { zh: 'zh-CN', ms: 'ms', ta: 'ta', ja: 'ja', ko: 'ko' }[pre];
+  const url = tl ? 'https://translate.google.com/translate?sl=en&tl=' + tl + '&u=' + encodeURIComponent(HELP_URL) : HELP_URL + '#readme';
+  window.open(url, '_blank', 'noopener');
+};
 $('planBtn').onclick = () => openDirections();
 $('ltTestBtn').onclick = () => { $('settings').hidden = true; setTimeout(ltTest, 300); };
 $('settingsBtn').onclick = () => { $('apiInput').value = API; $('codeInput').value = store.get('accessCode') || ''; $('themeSel').value = themeChoice(); $('bldgChk').checked = BLDG.on; $('wxSel').value = WX.mode; $('wxTripSel').value = WX.trip; $('testResult').textContent = ''; for (const k of ['Oriole', 'Crow', 'Bells', 'Rain', 'Thunder', 'Nightjar']) $('snd' + k).checked = SND.on(k.toLowerCase());
