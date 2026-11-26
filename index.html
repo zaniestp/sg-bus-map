@@ -408,7 +408,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '5.0', APP_DATE = '26 Nov 2026';
+const APP_VERSION = '5.0.1', APP_DATE = '26 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -3034,8 +3034,9 @@ $('searchForm').addEventListener('submit', e => {
     return;
   }
   const r = runSearch(v);
-  if (r && r.svcs.length + r.stops.length + r.roads.length === 1) {
+  if (r && r.svcs.length + r.stops.length + r.roads.length + (r.stns || []).length === 1) {
     hideResults();
+    if ((r.stns || []).length) return openStation(r.stns[0].id);
     if (r.svcs.length) return showService(r.svcs[0], 0);
     if (r.stops.length) return goToStop(r.stops[0].code);
     return showRoad(r.roads[0]);
