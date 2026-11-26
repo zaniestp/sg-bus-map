@@ -220,6 +220,7 @@
   .jsug .res { padding: 10px 12px; border-bottom: 1px solid rgba(127,127,127,.15); cursor: pointer; }
   .jsug .res small { display: block; color: var(--muted); font-size: 12px; }
   .jcard { border: 1px solid rgba(127,127,127,.25); border-radius: 14px; padding: 10px 12px; margin: 8px 0; cursor: pointer; }
+  .jcard.off { opacity: .45; filter: grayscale(1); cursor: default; }
   .jcard .jtop { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }
   .jchain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; }
   .jseg { color: #fff; font-weight: 700; border-radius: 8px; padding: 3px 8px; font-size: 14px; }
@@ -405,7 +406,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '4.4', APP_DATE = '25 Nov 2026';
+const APP_VERSION = '4.5', APP_DATE = '25 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -3990,7 +3991,8 @@ function jpFirstCatch(leg, walkM) {
   return best;
 }
 async function jpLoadLive(codes) {
-  codes = [...new Set(codes)].slice(0, 12); if (!codes.length || !API) return;
+  codes = [...new Set(codes)]; if (!codes.length || !API) return;
+  if (codes.length > 12) { for (let i = 0; i < codes.length; i += 12) await jpLoadLive(codes.slice(i, i + 12)); return; }
   try {
     const d = await api('/multi-arrival?stops=' + codes.join(','));
     for (const c of codes) {
@@ -4244,15 +4246,52 @@ async function planSearch() {
   let r = { list: [] };
   try { r = jpPlan(NET, from, to, { n: 5, pref: PLAN.pref, ban, peak: PLAN.peak }); } catch (e) { console.error(e); }
   PLAN.ms = Math.round(performance.now() - t0);
-  PLAN.results = r.list.map(j => jpFromEngine(j, F, T));
+  let list = r.list.map(j => jpFromEngine(j, F, T));
   PLAN.walkOnly = d <= 900 ? { m: d * JP.WALK_K } : null;
+  PLAN.idle = [];
+  const peakStops = [...new Set(list.flatMap(J => J.legs.filter(l => onOpts(l).some(o => JP.PEAK_ONLY(o.no))).map(l => l.board)))];
+  if (PLAN.peak && peakStops.length) {
+    await jpLoadLive(peakStops.concat(list.map(J => J.legs[0].board)));
+    const idleNos = new Set(list.flatMap(peakIdle));
+    if (idleNos.size) {
+      PLAN.idle = list.filter(J => peakIdle(J).length).map(J => ({ J, nos: peakIdle(J) }));
+      try { r = jpPlan(NET, from, to, { n: 5, pref: PLAN.pref, ban: new Set([...ban, ...idleNos]), peak: PLAN.peak }); } catch (e) { console.error(e); r = { list: [] }; }
+      list = r.list.map(j => jpFromEngine(j, F, T));
+      // anything else in the new list that uses a peak bus: check it too
+      const more = [...new Set(list.flatMap(J => J.legs.filter(l => onOpts(l).some(o => JP.PEAK_ONLY(o.no))).map(l => l.board)))].filter(c => !PLAN.live[c]);
+      if (more.length) await jpLoadLive(more);
+      for (const J of list.filter(J => peakIdle(J).length)) PLAN.idle.push({ J, nos: peakIdle(J) });
+      list = list.filter(J => !peakIdle(J).length);
+      // drop greyed routes that duplicate a working one
+      const sig = J => J.legs.map(l => onOpts(l).map(o => o.no).sort().join('/')).join('>');
+      const have = new Set(list.map(sig)); PLAN.idle = PLAN.idle.filter((x, i, a) => !have.has(sig(x.J)) && a.findIndex(y => sig(y.J) === sig(x.J)) === i).slice(0, 3);
+    }
+  }
+  // inside a group, untick peak-only buses that aren't running (the leg still has a working bus)
+  for (const J of list) for (const leg of J.legs) {
+    const idle = onOpts(leg).filter(o => JP.PEAK_ONLY(o.no) && PLAN.live[leg.board] && !peakRunning(o.no, leg.board));
+    if (idle.length && idle.length < onOpts(leg).length) idle.forEach(o => o.off = true);
+  }
+  PLAN.results = list;
   renderPlanResults();
   await jpLoadLive(PLAN.results.map(J => J.legs[0].board));
   if (state.mode === 'plan' && panelState.key === 'plan-results') renderPlanResults(true);
 }
+// peak-only buses (City Direct 6xx, express …e): running = live arrival times at the boarding stop;
+// with no live data, assume weekday peak hours (6:00–9:30, 17:00–20:30)
+function peakHoursNow() { const d = new Date(), wd = d.getDay(), m = d.getHours() * 60 + d.getMinutes(); return wd >= 1 && wd <= 5 && ((m >= 360 && m <= 570) || (m >= 1020 && m <= 1230)); }
+function peakRunning(no, code) { const L = PLAN.live[code]; return L ? (L[no] || []).length > 0 : peakHoursNow(); }
+function peakIdle(J) {                         // peak-only buses in this route that aren't running now
+  const out = new Set();
+  for (const leg of J.legs) { const on = onOpts(leg); const run = on.filter(o => !JP.PEAK_ONLY(o.no) || peakRunning(o.no, leg.board));
+    if (!run.length) on.forEach(o => out.add(o.no)); }      // a leg only fails if none of its buses run
+  return [...out];
+}
 function peakNote(J) {                       // City Direct 6xx / express …e only run at peak hours
   const p = [...new Set(J.legs.flatMap(l => onOpts(l).map(o => o.no)).filter(JP.PEAK_ONLY))];
-  return p.length ? h('div', { class: 'meta', style: 'color:#b45309' }, '⏰ ' + p.join(', ') + ' – peak-hour bus, check it is running now') : null;
+  if (!p.length) return null;
+  const live = J.legs.some(l => PLAN.live[l.board]);
+  return h('div', { class: 'meta', style: 'color:#b45309' }, '⏰ ' + p.join(', ') + (live ? ' – peak-hour bus, running now' : ' – peak-hour bus'));
 }
 function chainEl(J, ev) {
   const parts = [h('span', { class: 'jwalk' }, '🚶' + walkMins(ev.legs[0].walk))];
@@ -4289,7 +4328,12 @@ function renderPlanResults(live) {
       opt(PLAN.pref === 'walk', '🚶 Least walk', () => setPref('walk')),
       opt(PLAN.peak, '⏰ Peak buses', () => { PLAN.peak = !PLAN.peak; store.set('jpPeak', PLAN.peak ? '1' : '0'); planSearch(); })),
     PLAN.walkOnly ? h('div', { class: 'jcard' }, h('div', { class: 'jtop' }, h('b', null, '🚶 Walk ≈ ' + walkMins(PLAN.walkOnly.m) + ' min'), h('span', { class: 'meta' }, fmtDist(PLAN.walkOnly.m))), h('div', { class: 'meta' }, 'It may be quicker to walk.')) : null,
-    cards.length ? cards : h('div', { class: 'note' }, 'No bus route found within 3 changes. Try a start or end point closer to a bus stop' + (PLAN.peak ? '' : ', or include peak-hour-only buses') + '.'),
+    cards.length ? cards : null,
+    (PLAN.idle || []).length ? [h('div', { class: 'grp', style: 'margin-top:10px' }, '⏸ Not running now'),
+      ...PLAN.idle.map(({ J, nos }) => { const ev = jpEval(J); return h('div', { class: 'jcard off', onclick: () => toast('⏸ ' + nos.join(', ') + ' is a peak-hour bus and is not running now', 2500) },
+        h('div', { class: 'jtop' }, h('b', null, '≈ ' + Math.round(ev.T) + ' min'), h('span', { class: 'meta' }, 'not running now')),
+        chainEl(J, ev), h('div', { class: 'meta' }, '⏸ ' + nos.join(', ') + ' – peak-hour bus, no buses running at the moment')); })] : null,
+    cards.length ? null : h('div', { class: 'note' }, 'No bus route found within 3 changes. Try a start or end point closer to a bus stop' + (PLAN.peak ? '' : ', or include peak-hour-only buses') + '.'),
     h('div', { class: 'meta', style: 'margin-top:6px' }, 'Times are estimates · searched in ' + PLAN.ms + ' ms'));
   setPanelSummary(() => '🧭 ' + L.length + ' routes · ' + placeName(PLAN.to));
   if (L[order[0]]) drawJourney(L[order[0]], !live);
