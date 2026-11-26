@@ -1,5 +1,8 @@
 # 🚌 SG Bus Map
 
+🌐 **Read in:** [中文](https://translate.google.com/translate?sl=en&tl=zh-CN&u=https://github.com/zaniestp/sg-bus-map) · [Bahasa Melayu](https://translate.google.com/translate?sl=en&tl=ms&u=https://github.com/zaniestp/sg-bus-map) · [தமிழ்](https://translate.google.com/translate?sl=en&tl=ta&u=https://github.com/zaniestp/sg-bus-map) · [日本語](https://translate.google.com/translate?sl=en&tl=ja&u=https://github.com/zaniestp/sg-bus-map) · [한국어](https://translate.google.com/translate?sl=en&tl=ko&u=https://github.com/zaniestp/sg-bus-map)  
+<sub>Machine translation by Google Translate – the English version is the original.</sub>
+
 A live 3D map of Singapore buses, with journey planning by bus, MRT and LRT.
 
 **Open the app:** https://zaniestp.github.io/sg-bus-map/
