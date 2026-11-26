@@ -405,7 +405,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '4.3', APP_DATE = '25 Nov 2026';
+const APP_VERSION = '4.4', APP_DATE = '25 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -1258,17 +1258,20 @@ function inspectBuilding(point) {
   if (idx < 0 || !parts[idx] || !parts[idx].why) return false;
   BLDG.lastInspect = Date.now();
   flashBuilding(idx);
-  const ad = BLDG.info.addr && BLDG.info.addr[idx], om = BLDG.info.om && BLDG.info.om[idx];
-  const fmt = a => (a.n && a.n !== 'NIL' && !/^HDB/.test(a.n) ? a.n + ' ' : '') + 'Blk ' + a.b + (a.p && a.p !== 'NIL' ? ' · ' + a.p : '') + (a.h ? ' (HDB)' : '');
-  let omTxt = om ? (om.length > 1 ? 'this shape covers ' + om.length + ' addresses: ' : 'OneMap: ') + om.map(fmt).join('; ')
-                 : (OM.off ? 'OneMap off' : 'OneMap: no number');
-  // nearest OneMap address to where the finger is (on the ground)
-  let nb = null, nd = Infinity;
-  for (const a of BLDG.info.omPts || []) { const q = toXY([a.lng, a.lat]), d = Math.hypot(q[0] - ground[0], q[1] - ground[1]); if (d < nd) { nd = d; nb = a; } }
-  const nearTxt = nb ? ' · nearest to finger: ' + fmt(nb) + ' · ' + Math.round(nd) + ' m' : '';
-  const partTxt = list[idx].multi ? ' · part ' + (list[idx].partNo + 1) + ' of a multi-part map building' : '';
-  toast('🏢 ' + parts[idx].why + partTxt + ' · ' + omTxt + nearTxt + ' · map: ' + (ad ? [...ad].join(', ') : 'no number') +
-        ' · points in view: OneMap ' + (BLDG.info.omCount || 0) + ', map ' + (BLDG.info.addrCount || 0) + ' · labels ' + ((state.bldgStats && state.bldgStats.labels) || 0), 10000);
+  // just the facts: name, block, street, postal code (one entry per address in the building)
+  const om = BLDG.info.om && BLDG.info.om[idx], ad = BLDG.info.addr && BLDG.info.addr[idx];
+  const rows = om && om.length ? om.map(a => {
+    const name = a.n && a.n !== 'NIL' && !/^HDB/i.test(a.n) ? titleCase(a.n) : '';
+    return { name, blk: a.b && a.b !== 'NIL' ? (a.h ? 'Blk ' : 'No. ') + a.b : '', road: titleCase(a.r), pc: a.p && a.p !== 'NIL' ? 'Singapore ' + a.p : '' };
+  }) : ad ? [...ad].map(n => ({ name: '', blk: 'No. ' + n, road: '', pc: '' })) : [];
+  const box = $('addrCard'); box.innerHTML = '';
+  box.append(h('div', { class: 'hd' }, h('span', null, '🏢 Building'), h('button', { onclick: closeAddrCard, 'aria-label': 'Close' }, '✕')));
+  if (!rows.length) box.append(h('div', { class: 'meta', style: 'padding:6px 0' }, 'No address found for this building.'));
+  for (const r of rows) box.append(h('div', { class: 'ad' }, h('div', { class: 'at' },
+    r.name ? h('b', null, r.name) : null,
+    h(r.name ? 'small' : 'b', null, [r.blk, r.road].filter(Boolean).join(' ') || '–'),
+    r.pc ? h('small', null, r.pc) : null)));
+  closeStopCard(); box.hidden = false;
   return true;
 }
 // which building is under a screen point (topmost drawn building; for one map building with several parts, the part nearest the finger)
