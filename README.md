@@ -28,8 +28,7 @@ It works in any modern phone or computer browser. There's nothing to install. On
 1. Open the link above.
 2. When the browser asks, **allow location**. The app uses it to find stops and stations near you and to follow your bus. It stays on your phone.
 3. Type a bus number (e.g. `168`), a stop, an MRT station or a postal code in the search box. You can also tap **🧭** to plan a journey.
-
-If you see **"Live times not available"**, live arrival times aren't available on this phone. Everything else still works. Ask the person who shared the app with you.
+4. **Live bus times need an access code.** Request one from **zaniestp** on GitHub: https://github.com/zaniestp. Then tap ⚙ → **Access code**, type it in and tap **Save**. Without a code, the map, directions and stations still work; only the live arrival times show "Live times not available".
 
 ---
 
@@ -228,7 +227,7 @@ All of these are in ⚙ Settings.
 | Problem | Try this |
 |---|---|
 | A new feature isn't there / app looks old | Check your version: tap ⚙, then tap the **Settings title 5 times**. Close the tab and open the link again |
-| "Live times not available" | Live times aren't available on this phone. The map, routes and directions still work |
+| "Live times not available" | You need an access code. Request one from zaniestp on GitHub (https://github.com/zaniestp), then enter it in ⚙ → Access code. If you already have one, check it's typed exactly right |
 | No sound | Turn the media volume up. On iPhone, also switch off silent mode. During a trip, check the sound button shows 🔊, not 🔇 |
 | Location not found | Allow location for your browser in the phone settings, then tap ◎ |
 | Train position wrong | Tap the station you're at in the train view |
