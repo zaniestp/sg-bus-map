@@ -413,7 +413,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '5.0.3', APP_DATE = '27 Nov 2026';
+const APP_VERSION = '5.0.4', APP_DATE = '28 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -1840,8 +1840,11 @@ function wxFrame(ts) {
   // keep the right number of clouds / drops
   while (WX.clouds.length < cfg.clouds) WX.clouds.push({ x: Math.random() * Wd, y: Math.random() * Ht * 0.55, r: (60 + Math.random() * 90) * s, v: (8 + Math.random() * 14) * s, k: Math.random() });
   if (WX.clouds.length > cfg.clouds) WX.clouds.length = cfg.clouds;
-  while (WX.drops.length < cfg.rain) WX.drops.push({ x: Math.random() * Wd, y: Math.random() * Ht, v: (700 + Math.random() * 500) * s, l: (10 + Math.random() * 14) * s });
-  if (WX.drops.length > cfg.rain) WX.drops.length = cfg.rain;
+  // drops slant right (0.18 px across per px down): start them from a strip reaching past the left edge so the whole screen gets rain
+  const slant = Ht * 0.18, spawnX = () => Math.random() * (Wd + slant) - slant;
+  const nRain = Math.round((cfg.rain || 0) * (Wd + slant) / Wd);     // extra drops for the strip, so the visible rain stays as dense
+  while (WX.drops.length < nRain) { const y = Math.random() * Ht; WX.drops.push({ x: spawnX() + y * 0.18, y, v: (700 + Math.random() * 500) * s, l: (10 + Math.random() * 14) * s }); }
+  if (WX.drops.length > nRain) WX.drops.length = nRain;
   g.clearRect(0, 0, Wd, Ht);
   g.globalAlpha = dim;
   if (cfg.dark) { g.fillStyle = `rgba(20,30,45,${cfg.dark})`; g.fillRect(0, 0, Wd, Ht); }
@@ -1861,7 +1864,8 @@ function wxFrame(ts) {
     g.strokeStyle = night ? 'rgba(170,190,220,0.45)' : 'rgba(90,110,140,0.45)'; g.lineWidth = 1.2 * s; g.beginPath();
     for (const d of WX.drops) {
       d.y += d.v * dt; d.x += d.v * 0.18 * dt;
-      if (d.y > Ht) { d.y = -d.l; d.x = Math.random() * Wd; }
+      if (d.y > Ht) { d.y = -d.l; d.x = spawnX(); }
+      else if (d.x - d.l * 0.18 > Wd) d.x -= Wd + slant;       // slid off the right edge → back in on the left
       g.moveTo(d.x, d.y); g.lineTo(d.x - d.l * 0.18, d.y - d.l);
     }
     g.stroke();
