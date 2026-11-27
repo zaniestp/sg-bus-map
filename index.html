@@ -413,7 +413,7 @@
 
 <script>
 // ======================= CONFIG =======================
-const APP_VERSION = '5.0.2', APP_DATE = '27 Nov 2026';
+const APP_VERSION = '5.0.3', APP_DATE = '27 Nov 2026';
 const DEFAULT_API = 'https://sg-bus-proxy.zanyzanzen.workers.dev';
 const POLL_MS = 20000;          // live data refresh
 const ALERT_STOPS = 2;          // first alight alert, stops before your stop
@@ -463,12 +463,42 @@ function decodePolyline(str) {
 // Build a route object with cumulative distance ("chainage") and stop chainages
 function makeRoute(lineLL, stopLL, checked) {
   const ends = stopLL.filter(Boolean);
+  const d = (a, b) => { const p = toXY(a), q = toXY(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); };
   if (!checked && lineLL.length > 1 && ends.length > 1) {
     // Some dataset lines are stored opposite to the stop order: compare the ends & flip
-    const d = (a, b) => { const p = toXY(a), q = toXY(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); };
     const s0 = ends[0], s1 = ends[ends.length - 1], l0 = lineLL[0], l1 = lineLL[lineLL.length - 1];
     if (d(s0, l1) + d(s1, l0) + 200 < d(s0, l0) + d(s1, l1)) lineLL = lineLL.slice().reverse();
   }
+  let R = lineRoute(lineLL, stopLL);
+  if (checked || ends.length < 3 || lineLL.length < 3) return R;
+  // Loop shapes that start somewhere else (e.g. 298 drawn from Tampines Int, but its stops start at
+  // Tampines Nth Int): turn the loop so it starts at the first stop, keep whichever fits the stops best
+  const l0 = lineLL[0], l1 = lineLL[lineLL.length - 1];
+  if (d(l0, l1) < 80 && d(ends[0], l0) > 150) {
+    let best = { R, q: placeQuality(R, stopLL) };
+    const p0 = toXY(ends[0]);
+    let run = null; const cuts = [];
+    for (let i = 0; i < R.xy.length - 1; i++) {
+      const r = projSeg(R, p0, i);
+      if (r.d <= 120) { if (!run || r.d < run.d) run = r; } else if (run) { cuts.push(run); run = null; }
+    }
+    if (run) cuts.push(run);
+    for (const c of cuts) {
+      const cut = toLL(xyAt(R, c.ch)), i = c.seg;
+      const rot = [cut, ...R.ll.slice(i + 1), ...R.ll.slice(1, i + 1), cut];
+      const R2 = lineRoute(rot, stopLL), q = placeQuality(R2, stopLL);
+      if (q < best.q) best = { R: R2, q };
+    }
+    R = best.R;
+  }
+  // Safety net: if stops still pile up on one spot, the shape doesn't fit – draw stop to stop instead
+  if (stackedStops(R, stopLL) >= Math.max(3, ends.length * 0.1)) {
+    const R2 = lineRoute(ends, stopLL);
+    if (stackedStops(R2, stopLL) < stackedStops(R, stopLL)) { R2.rough = true; R = R2; }
+  }
+  return R;
+}
+function lineRoute(lineLL, stopLL) {
   const xy = [], ll = [];
   for (const p of lineLL) {
     const q = toXY(p), l = xy[xy.length - 1];
@@ -481,6 +511,21 @@ function makeRoute(lineLL, stopLL, checked) {
   const R = { xy, ll, cum, length: cum[cum.length - 1] };
   R.stopCh = placeStops(R, stopLL);
   return R;
+}
+// how well the placed stops fit: metres off the line, plus a big penalty per stop squashed onto the one before
+function placeQuality(R, stopLL) {
+  let q = 0;
+  stopLL.forEach((p, i) => { if (!p) return; const a = xyAt(R, R.stopCh[i]), b = toXY(p); q += Math.min(500, Math.hypot(a[0] - b[0], a[1] - b[1])); });
+  return q + stackedStops(R, stopLL) * 1000;
+}
+function stackedStops(R, stopLL) {     // stops placed on the same spot as the one before, though they are apart
+  let n = 0;
+  for (let i = 1; i < stopLL.length; i++) {
+    if (!stopLL[i] || !stopLL[i - 1]) continue;
+    const a = toXY(stopLL[i]), b = toXY(stopLL[i - 1]);
+    if (R.stopCh[i] - R.stopCh[i - 1] < 5 && Math.hypot(a[0] - b[0], a[1] - b[1]) > 60) n++;
+  }
+  return n;
 }
 // Place stops along the route in order. Every pass of the route near a stop is a
 // candidate; dynamic programming picks the in-order combination closest overall.
